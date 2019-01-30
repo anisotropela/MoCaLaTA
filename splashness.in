@@ -1,0 +1,12 @@
+# Value                                             | Variable  | Explanation
+20.                                                 # Lbox         : Box size / kpc
+'data/Jespers.bin'                                  # jesperfile   : Output file, readable by BuildAMR.f90
+'data/SE_noBH_LR.00054_splash_HI_grid.dat'          # nHIfile      : HI number density / cm-3
+'data/SE_noBH_LR.00054_splash_temperature_grid.dat' # Tfile        : Temperature / K
+'data/SE_noBH_LR.00054_splash_vx_grid.dat'          # vxfile       : \
+'data/SE_noBH_LR.00054_splash_vy_grid.dat'          # vyfile       :  > Bulk velocity / km/s
+'data/SE_noBH_LR.00054_splash_vz_grid.dat'          # vzfile       : /
+'data/SE_noBH_LR.00054_splash_luminosity_grid.dat'  # starLyafile  : Lya luminosity from stars / erg/s (or just s-1)
+'data/SE_noBH_LR.00054_splash_cooling_grid.dat'     # coolLyafile  : Lya luminosity from cooling / erg/s (or just s-1)
+'data/SE_noBH_LR.00054_splash_HII_grid.dat'         # nHIIfile     : HII number density / cm-3
+'data/SE_noBH_LR.00054_splash_metallicity_grid.dat' # Zfile        : Metallicity / Zsun

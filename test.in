@@ -1,0 +1,50 @@
+
+#     Value             |  Variable |Type| Description
+
+'data'                  # model     |  C |
+
+# I/O
+'testdir/'              # DataDir   |  C | Mother directory
+'./'                    # Subdir    |  C | Subdirectory with with input file
+'RawData.bin'           # RawData   |  C | Input for InititalEmission
+'CellData.bin'          # CellData  |  C | Output from InititalEmission, input for MoCaLaTA
+1                       # wrtph     |  I | Print to std. output for every wrtph photon
+100                     # wrtfl     |  I | Write file for every wrtfl photon
+''                      # outlabel  |  C | Label for main output files
+''                      # specin    |  C | -"- for input spectrum in Doppler widths; '' to omit
+'test.out'              # specout   |  C | -"- for output spectrum in Doppler widths; '' to omit
+
+# Observations
+1200. 1230.             # BW        | 2D | Wavelength interval bounds in Angstrom
+200                     # pix       |  I | # of pixels/side in CCD
+300                     # SpecRes1D |  I | Resolution of 1D spectrum; bins
+300                     # SpecRes2D |  I | Resolution of 2D spectrum; bins
+T T T T T T             # WhichCCDs | 6L | (xp,xm,yp,ym,zp,zm)
+
+# Simulation
+25.                     # D_obs     |  D | Side length of area covered by CCD (centered on box center)
+1e4                     # D_emit    |  D | Side length of box, outside which lum. is set to zero (centered on box center)
+10000                   # n_phtot   |  I | Total # of photons; Lya + cont.
+1d300                   # b_Lya     |  D | Lya boost buffer (1 to equalize cells, ->inf to use original lumnosity)
+1d300                   # b_FUV     |  D | FUV     -"-
+'intrinsic'             # x_critType|  C | 'intrinsic', 'global', '<value>', or 'max<value>', where <value> is a real number
+'proper'                # x_injType |  C | 
+'lumdep'                # X_init    |  C | Initial position: 'lumdep', 'central', 'homo', or '(x y z)', with x,y,z given in terms of D_box
+'iso'                   # n_init    |  C | Initial direction: 'iso' or '(nx ny nz)'
+F                       # TrueRan   |  L | Use "true" random number (given by current date and time)
+10000                   # N_los     |  I | # of sightlines for calculating average quantities
+
+# Gas
+T                       # recoil    |  L | Include atom recoil
+
+# Dust
+'SMC'                   # DustType  |  C | 'SMC', 'LMC', or fixed cross section per hydrogen nucleus, e.g. '1.03e-21'
+.01                     # f_ion     |  D | Fraction of ionized hydrogen that contributes to dust density
+.32                     # albedo    |  D | Dust albedo
+.73                     # g         |  D | Dust scattering asymmetry parameter
+
+# Cosmology
+3.                      # z         |  D | Redshift of snapshot
+70.                     # H_0       |  D | Hubble constant, km/s/Mpc
+.3                      # Omega_M   |  D | Matter density parameter
+.7                      # Omega_L   |  D | Dark energy density parameter
