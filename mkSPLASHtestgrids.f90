@@ -42,7 +42,7 @@ program mkSPLASHtestgrids
   ! Filenames (filebase + vars(v) + '.dat'
   testdir  = 'testdir/'
   inquire(file=trim(testdir), exist=ex)
-  if (.not. ex) call system('mkdir'//trim(testdir))
+  if (.not. ex) call system('mkdir '//trim(testdir))
   filebase = trim(testdir) // 'SPLASHtestgrid_'
   vars(1)  = 'nHI'
   vars(2)  = 'nHII'
