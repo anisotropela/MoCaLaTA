@@ -1,4 +1,11 @@
 ! Test snippet for reading an IFU cube produced by MoCaLaTA
+!
+! Usage:
+!   > gfortran -O3 readMoCaLaTA.f90 -o readMoCaLaTA.x
+!   > ./readMoCaLaTA.x filename # (e.g. testdir/xp.bin)
+!
+!------------------------------------------------------------------------------
+
 module kinds
   integer, parameter:: sp      = kind(1.0)
   integer, parameter:: dp      = kind(1.0d0)
