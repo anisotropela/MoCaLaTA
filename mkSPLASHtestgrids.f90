@@ -30,7 +30,7 @@ program mkSPLASHtestgrids
   nk      = ni
   Lbox    = 20.                 !Box size in kpc
   Rbox    = Lbox / 2
-  NcolHI  = 1e19                !HI column density from center to edge
+  NcolHI  = 1e23                !HI column density from center to edge
   nHI     = NcolHI / (Rbox*kpc) !HI density (global)
   nHII    = 0.                  !HII density (global)
   T       = 1e4                 !Temperature (global)

@@ -13,7 +13,7 @@ The version of <span style="font-variant:small-caps;">MoCaLaTA</span> is slightl
 
 The code is free for anyone to use, copy, modify, distribute, and so on, as desribed in the [License](https://github.com/anisotropela/MoCaLaTA/blob/master/LICENSE). If your work leads to a publication, I'd like you to cite
 
-[Laursen, Razoumov, & Sommer-Larsen 2009, ApJ, 696, 853](https://iopscience.iop.org/article/10.1088/0004-637X/696/1/853/meta)
+[Laursen, Razoumov, & Sommer-Larsen (2009, ApJ, 696, 853)](https://iopscience.iop.org/article/10.1088/0004-637X/696/1/853/meta)
 
 where the code is described, tested, and applied. The implementation of dust in the code is described in [Laursen, Sommer-Larsen, & Andersen (2009, ApJ, 704, 1640)](https://iopscience.iop.org/article/10.1088/0004-637X/704/2/1640/meta).
 
@@ -142,6 +142,40 @@ As the code is running, some output is generated along the way. This can be redi
 
 ## Output
 
-A text file containing information about each escaping photon is generated, along with an "IFU" cube representing an "observation" of the galaxy from six directions.
+A text file containing information about each escaping photon is generated, along with up to six "IFU" cubes representing an "observation" of the galaxy along the Cartesian axes.
 
-# <span style="color:red">**I'll write more here — right now there seems to be a problem with the output files 😬**</span>
+## Analyzing the output
+
+A Python code (under development) is provided. Currently, it can do two things
+
+* generate an image and a spectrum from an IFU cube, and
+* shows the anisotropic escape of the photons (using a Mollweide projection)
+
+### Image and spectrum
+
+The IFU cubes are saved in the directory `DataDir`/`SubDir`/, and are called `xm.bin` (for the view along the $x$ axis in the negtive direction), `xp.bin`, etc. The keywords `DataDir` and `SubDir` are set in the input file (`test.in` in the example), where you can also set a keyword `outlabel`, which is appended to the basename of the files, just before the extension `.bin`.
+
+To "observe" the galaxy in the example above from the positive direction of the $x$ axis, do (in Python):
+
+```
+>>> import analyzeMoCaLaTA as am
+>>> am.showobs('testdir','xp')
+```
+
+This should produce something like the following figure
+
+![image](/Users/pela/GitHub/MoCaLaTA/test_image.png)
+
+To extract only the spectrum of the pixels inside an circular aperture of radius `r` kpc centered on [`x0`,`y0`] \(also in kpc\), use
+
+```
+>>> am.showobs('testdir','xp',ap=[x0,y0,r])
+```
+
+### Anisotropic escape
+
+In addition to the IFU cubes, <span style="font-variant:small-caps;">MoCaLaTA</span> also spits out a text file with some information about each photon packet
+
+**WILL WRITE MORE HERE. THE FOLLOWING FIGURE WILL BE PRODUCED**
+
+![anis](/Users/pela/GitHub/MoCaLaTA/test_anis.png)
