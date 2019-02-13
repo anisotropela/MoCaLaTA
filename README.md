@@ -164,7 +164,7 @@ To "observe" the galaxy in the example above from the positive direction of the 
 
 This should produce something like the following figure
 
-![image](/Users/pela/GitHub/MoCaLaTA/test_image.png)
+![image](./test_image.png)
 
 To extract only the spectrum of the pixels inside an circular aperture of radius `r` kpc centered on [`x0`,`y0`] \(also in kpc\), use
 
@@ -178,4 +178,4 @@ In addition to the IFU cubes, <span style="font-variant:small-caps;">MoCaLaTA</s
 
 **WILL WRITE MORE HERE. THE FOLLOWING FIGURE WILL BE PRODUCED**
 
-![anis](/Users/pela/GitHub/MoCaLaTA/test_anis.png)
+![anis](./test_anis.png)
