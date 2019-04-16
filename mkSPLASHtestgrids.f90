@@ -12,7 +12,8 @@ program mkSPLASHtestgrids
   integer, parameter::    sp = kind(1.0)
   integer, parameter::    dp = kind(1.0d0)
   integer::               i,j,k
-  character(len=20)::     cni,nifmt
+  character(len=20)::     cni,nifmt,f
+  character(len=4)::      ext
   integer, parameter::    nvar = 9
   character(len=200)::    filebase,testdir
   logical::               ex
@@ -23,6 +24,8 @@ program mkSPLASHtestgrids
   real(dp)::              Lbox,Rbox,dx,dy,dz,dcell
   real(dp)::              xcell(3)
   real(dp)::              NcolHI,nHI,nHII,T,Vout,starLya,coolLya,Z
+
+  f = 'formatted'               !'formatted' or 'unformatted' output
 
   ! Set physical values
   ni      = 10                  !Resolution
@@ -92,25 +95,36 @@ program mkSPLASHtestgrids
   ! Write files
   write(cni,'(i4.4)') ni
   nifmt = '(' // trim(cni) // 'es15.6)'
+  if (f .eq. 'unformatted') then
+    ext = '.bin'
+  else
+    ext = '.dat'
+  endif
   do v=1,9
     lun = v + 10 ! Because Fortran...
-    open(lun,file=trim(filebase)//trim(vars(v))//'.dat',form='formatted',status='replace',action='write')
-    write(lun,'(a)') '# ' // trim(vars(v)) // ' test grid made to look like SPLASH data'
-    write(lun,'(a)') '#'
-    write(lun,'(a)') '# written in the form:'
-    write(lun,'(a)') '#   do k=1,nz' !nx,ny,nz because that's what the SPLASH files look like
-    write(lun,'(a)') '#      do j=1,ny'
-    write(lun,'(a)') '#         write(*,*) (dat(i,j,k),i=1,nx)'
-    write(lun,'(a)') '#      enddo'
-    write(lun,'(a)') '#   enddo'
-    write(lun,'(a)') '#'
-    write(lun,'(a)') '# grid dimensions:'
-    write(lun,'(a)') '#  nx   ny   nz'
-    write(lun,'(3i5)') ni,nj,nk
-    do k=1,nk
-      do j=1,nj
-        write(lun,nifmt) (cube(v,i,j,k), i=1,ni)
+    open(lun,file=trim(filebase)//trim(vars(v))//ext,form=trim(f),status='replace',action='write')
+
+    if (f .eq. 'unformatted') then
+      write(lun) ni,nj,nk
+      write(lun) cube(v,:,:,:)
+    else
+      write(lun,'(a)') '# ' // trim(vars(v)) // ' test grid made to look like SPLASH data'
+      write(lun,'(a)') '#'
+      write(lun,'(a)') '# written in the form:'
+      write(lun,'(a)') '#   do k=1,nz' !nx,ny,nz because that's what the SPLASH files look like
+      write(lun,'(a)') '#      do j=1,ny'
+      write(lun,'(a)') '#         write(*,*) (dat(i,j,k),i=1,nx)'
+      write(lun,'(a)') '#      enddo'
+      write(lun,'(a)') '#   enddo'
+      write(lun,'(a)') '#'
+      write(lun,'(a)') '# grid dimensions:'
+      write(lun,'(a)') '#  nx   ny   nz'
+      write(lun,'(3i5)') ni,nj,nk
+      do k=1,nk
+        do j=1,nj
+          write(lun,nifmt) (cube(v,i,j,k), i=1,ni)
+        enddo
       enddo
-    enddo
+    endif
   enddo
 end program mkSPLASHtestgrids

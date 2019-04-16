@@ -63,6 +63,7 @@ end module kinds
 module globals
   use kinds
   character(200):: splashout,file1,nHIfile,nHIIfile,Tfile,vxfile,vyfile,vzfile,starLyafile,coolLyafile,Zfile,jesperfile
+  character(20)::  f
   integer::        ni,nj,nk,icell,ncell
   integer::        ni1=-1,nj1=-1,nk1=-1
   real(sp), allocatable, dimension(:,:,:):: cube
@@ -78,6 +79,7 @@ program splash2jesper
   use globals
   implicit none
 
+  f = 'formatted'
   call readinput
 
   call readcube(nHIfile);     call mkpos; call mknHI
@@ -123,7 +125,8 @@ end subroutine readinput
 !------------------------------------------------------------------------------
 
 subroutine readcube(cubefile)
-  !Read SPLASH output file
+  !Read SPLASH output file.
+  !f should be either 'formatted' (for text files) or 'unformatted' (for binary)
   use globals
   implicit none
   character(200),intent(in):: cubefile
@@ -131,18 +134,22 @@ subroutine readcube(cubefile)
   integer:: i,j,k
 
   write(*,*) 'Loading ' // trim(cubefile) // '...'
-  open(1,file=trim(cubefile),form='formatted',status='old',action='read')
+  open(1,file=trim(cubefile),form=trim(f),status='old',action='read')
 
   ! Read header and array size
-  do i=1,25
-    read(1,*) line
-    if (index(trim(line), '#') .ne. 1) then
-      backspace(1)
-      read(1,*) ni,nj,nk
-      exit
-    endif
-    if (i.eq.25) stop "Doesn't seem like a SPLASH file..."
-  enddo
+  if (f .eq. 'unformatted') then
+    read(1) ni,nj,nk
+  else
+    do i=1,25
+      read(1,*) line
+      if (index(trim(line), '#') .ne. 1) then
+        backspace(1)
+        read(1,*) ni,nj,nk
+        exit
+      endif
+      if (i.eq.25) stop "Doesn't seem like a SPLASH file..."
+    enddo
+  endif
 
   ! Save grid size and file name of first file for later checks
   if (ni1 .eq. -1) then
@@ -162,11 +169,17 @@ subroutine readcube(cubefile)
   endif
 
   ! Read cube
-  do k=1,nk
-    do j=1,nj
-      read(1,*) (cube(i,j,k), i=1,ni)
+  if (f == 'unformatted') then
+    read(1) cube
+  else
+    do k=1,nk
+      do j=1,nj
+        read(1,*) (cube(i,j,k), i=1,ni)
+      enddo
     enddo
-  enddo
+  endif
+
+  print*, trim(cubefile), cube(ni/2,nj/2,nk/2)
 
   close(1)
 end subroutine readcube
