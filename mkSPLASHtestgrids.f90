@@ -38,8 +38,8 @@ program mkSPLASHtestgrids
   nHII    = 0.                  !HII density (global)
   T       = 1e4                 !Temperature (global)
   Vout    = 0.                  !Outflow velocity (global)
-  starLya = 1e33                !Stellar Lya luminosity (central)
-  coolLya = 0.                  !Cooling radiation (global)
+  starLya = 33.                 !log(stellar Lya luminosity) (central)
+  coolLya = -33.                !log(cooling radiation) (global)
   Z       = 0.                  !Metallicity (global)
 
   ! Filenames (filebase + vars(v) + '.dat'

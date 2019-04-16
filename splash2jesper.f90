@@ -14,8 +14,8 @@
 !     1   HI density
 !     2   Temperature
 !     3-5 Bulk velocity (1 files for each axis)
-!     6   Lya luminosity from stars
-!     7   Lya luminosity from cooling radiation
+!     6   log(Lya luminosity) from stars
+!     7   log(Lya luminosity) from cooling radiation
 !     8   HII density
 !     9   Metallicity
 !  At some point I'll change this code to allow for not including file 7 and/or
@@ -115,8 +115,8 @@ subroutine readinput
   read(1,*) vxfile       !Filename for bulk velocity in x-direction / km/s
   read(1,*) vyfile       !Filename for bulk velocity in y-direction / km/s
   read(1,*) vzfile       !Filename for bulk velocity in z-direction / km/s
-  read(1,*) starLyafile  !Filename for Lya luminosity from stars / erg/s (or just s-1)
-  read(1,*) coolLyafile  !Filename for Lya luminosity from cooling / erg/s (or just s-1)
+  read(1,*) starLyafile  !Filename for log(Lya luminosity) from stars / erg/s (or just s-1)
+  read(1,*) coolLyafile  !Filename for log(Lya luminosity) from cooling / erg/s (or just s-1)
   read(1,*) nHIIfile     !Filename for HII number density / cm-3
   read(1,*) Zfile        !Filename for metallicity / Zsun
 
@@ -288,8 +288,8 @@ subroutine mkLya(process)
   integer, intent(in):: process                 !1:stars or 2:cooling
   integer:: i,j,k
 
-  where(cube .lt. 1e-33) cube = 1e-33           !Make sure there are no zeros
-  cube = log10(cube)                            !Since we want logL_Lya
+! where(cube .lt. 1e-33) cube = 1e-33           !Make sure there are no zeros
+! cube = log10(cube)                            !Since we want logL_Lya
   if (.not. allocated(LLY)) allocate(LLY(ncell,2))
 
   icell = 0
