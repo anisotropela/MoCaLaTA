@@ -179,8 +179,6 @@ subroutine readcube(cubefile)
     enddo
   endif
 
-  print*, trim(cubefile), cube(ni/2,nj/2,nk/2)
-
   close(1)
 end subroutine readcube
 !------------------------------------------------------------------------------

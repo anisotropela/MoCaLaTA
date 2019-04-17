@@ -28,12 +28,12 @@ program mkSPLASHtestgrids
   f = 'unformatted'               !'formatted' or 'unformatted' output
 
   ! Set physical values
-  ni      = 10                  !Resolution
+  ni      = 100                 !Resolution
   nj      = ni
   nk      = ni
   Lbox    = 20.                 !Box size in kpc
   Rbox    = Lbox / 2
-  NcolHI  = 1e23                !HI column density from center to edge
+  NcolHI  = 1e20                !HI column density from center to edge
   nHI     = NcolHI / (Rbox*kpc) !HI density (global)
   nHII    = 0.                  !HII density (global)
   T       = 1e4                 !Temperature (global)
@@ -58,6 +58,7 @@ program mkSPLASHtestgrids
   vars(9)  = 'Z'
 
   !Initialize cubes
+  write(*,*) 'Allocating memory...'
   allocate(cube(nvar,ni,nj,nk))
   cube = 0 !The following loop only assigns values inside sphere, so set to 0 outside
 
@@ -66,6 +67,7 @@ program mkSPLASHtestgrids
   dy = Lbox / nj
   dz = Lbox / nk
 
+  write(*,*) 'Assigning values...'
   do i=1,ni
     do j=1,nj
       do k=1,nk
@@ -100,7 +102,9 @@ program mkSPLASHtestgrids
   else
     ext = '.dat'
   endif
+  write(*,'(a'//'34'//')',advance='no') 'Writing data'//repeat(' ',10)//'|'//repeat(achar(8),10+1)
   do v=1,9
+    write(*,'(a)',advance='no') '.'
     lun = v + 10 ! Because Fortran...
     open(lun,file=trim(filebase)//trim(vars(v))//ext,form=trim(f),status='replace',action='write')
 
@@ -127,4 +131,5 @@ program mkSPLASHtestgrids
       enddo
     endif
   enddo
+  write(*,'(a)',advance='yes') '.'
 end program mkSPLASHtestgrids
