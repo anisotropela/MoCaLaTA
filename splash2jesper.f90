@@ -79,7 +79,7 @@ program splash2jesper
   use globals
   implicit none
 
-  f = 'formatted'
+  f = 'unformatted'
   call readinput
 
   call readcube(nHIfile);     call mkpos; call mknHI
@@ -339,7 +339,7 @@ subroutine mkZ(element)
   integer:: i,j,k
 
   where(cube .lt. 1e-33) cube = 1e-33               !Make sure there are no zeros
-  if (.not. allocated(abun)) allocate(abun(ncell,1))!Use only one metallicity, but write 7 times
+  if (.not. allocated(abun)) allocate(abun(ncell,1))!Use only one metallicity
 
   icell = 0
   do i = 1,ni
@@ -370,12 +370,12 @@ subroutine writeJesper
   write(14) (lnH(icell),    icell=1,ncell)
   write(14) (lx(icell),     icell=1,ncell)
 ! write(14) (abun(icell,1), icell=1,ncell)
-  write(14) (abun(icell,1), icell=1,ncell)
-  write(14) (abun(icell,1), icell=1,ncell)
-  write(14) (abun(icell,1), icell=1,ncell)
-  write(14) (abun(icell,1), icell=1,ncell)
-  write(14) (abun(icell,1), icell=1,ncell)
-  write(14) (abun(icell,1), icell=1,ncell)
+! write(14) (abun(icell,1), icell=1,ncell)
+! write(14) (abun(icell,1), icell=1,ncell)
+! write(14) (abun(icell,1), icell=1,ncell)
+! write(14) (abun(icell,1), icell=1,ncell)
+! write(14) (abun(icell,1), icell=1,ncell)
+! write(14) (abun(icell,1), icell=1,ncell)
 ! write(14) (abun(icell,1), icell=1,ncell)
   write(14) (abun(icell,1), icell=1,ncell)
   write(14) (vel(icell,1),  icell=1,ncell)

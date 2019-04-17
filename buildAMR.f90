@@ -10,7 +10,7 @@ real(kind=RealKind), parameter :: Mpc     = 1.e6*pc
 real(kind=RealKind), parameter :: mp      = 1.6726231e-24
 real(kind=RealKind), parameter :: mn      = 1.67492728e-24
 real(kind=RealKind), parameter :: mh      = mp
-real(kind=RealKind), parameter :: mhe     = 2.*(mp+mn)
+!real(kind=RealKind), parameter :: mhe     = 2.*(mp+mn)
 real(kind=RealKind), parameter :: psi     = 0.76
 real(kind=RealKind), parameter :: G       = 4.3d-6
 real(kind=RealKind), parameter :: M_sun   = 1.99d33
@@ -23,17 +23,19 @@ integer :: icosmic, ncosmic
 real:: R
 
 type :: zoneType
-   real*4 :: rho, tgas, HI, HeI, HeII, V(3)
+   real*4::  rho, tgas, HI, V(3)
+ ! real*4::  HeI, HeII
    real*4::  Hydrogen, x
  ! real*4::  Helium
-   real*4::  Carbon
-   real*4::  Nitrogen
-   real*4::  Oxygen
-   real*4::  Magnesium
-   real*4::  Silicon
-   real*4::  Sulfur
+ ! real*4::  Carbon
+ ! real*4::  Nitrogen
+ ! real*4::  Oxygen
+ ! real*4::  Magnesium
+ ! real*4::  Silicon
+ ! real*4::  Sulfur
  ! real*4::  Calcium
-   real*4::  Iron
+ ! real*4::  Iron
+   real*4::  Z
    real*4 :: logL_Lya_HII,logL_Lya_cool
    logical(1) :: refined
    integer(1) :: level ! maximum 127 levels of cell refinement
@@ -49,16 +51,18 @@ integer*4, dimension(:), pointer :: cellArrayLevel,cellArrayLevelORIG
 real*4, dimension(:), pointer :: cellArrayXpos,  cellArrayYpos, cellArrayZpos, &
                                  cellArrayXvel,  cellArrayYvel, cellArrayZvel, &
                                  cellArrayHydrogen,    cellArrayx,             &
-                                 cellArrayHI,    cellArrayHeI,  cellArrayHeII, &
+                                 cellArrayHI,                                  &
+                               !                 cellArrayHeI,  cellArrayHeII, &
                                ! cellArrayHelium,                              &
-                                 cellArrayCarbon,       OrigArr ,              &
-                                 cellArrayNitrogen,                            &
-                                 cellArrayOxygen,                              &
-                                 cellArrayMagnesium,                           &
-                                 cellArraySilicon,                             &
-                                 cellArraySulfur,                              &
+                               ! cellArrayCarbon,                              &
+                               ! cellArrayNitrogen,                            &
+                               ! cellArrayOxygen,                              &
+                               ! cellArrayMagnesium,                           &
+                               ! cellArraySilicon,                             &
+                               ! cellArraySulfur,                              &
                                ! cellArrayCalcium,                             &
-                                 cellArrayIron,                                &
+                               ! cellArrayIron,                                &
+                                 cellArrayZ,                                   &
                                  DammitAlex,                                &
                                  cellArrayTemp, cellArrayDensity
 real*4, dimension(:), pointer :: cellArraylogL_Lya_HII,cellArraylogL_Lya_cool
@@ -79,7 +83,7 @@ program BuildAMR
 use localDefinitions
 
 implicit none
-integer :: cc, i, j, k, icell, nx, ny, nz, i0, j0, k0, lmax, nlevels, level, itmp
+integer :: cc, i, j, k, icell, nx, ny, nz, i0, j0, k0, lmax, nlevels, level, itmp, nmetals
 real(kind=RealKind) :: x0, y0, z0, xa, xb, ya, yb, za, zb, tmp1, tmp2, &
      xnew, ynew, znew, xpos, ypos, zpos, LLY
 type(readLevelType), dimension(:), pointer :: readLevel
@@ -90,14 +94,15 @@ interface
   recursive subroutine placeCellProject(ParentCell,level,x0,y0,z0, &
                                         logtgas,lognh,logxneu,     &
                                       ! pCPHelium,                 &
-                                        pCPCarbon,                 &
-                                        pCPNitrogen,               &
-                                        pCPOxygen,                 &
-                                        pCPMagnesium,              &
-                                        pCPSilicon,                &
-                                        pCPSulfur,                 &
+                                      ! pCPCarbon,                 &
+                                      ! pCPNitrogen,               &
+                                      ! pCPOxygen,                 &
+                                      ! pCPMagnesium,              &
+                                      ! pCPSilicon,                &
+                                      ! pCPSulfur,                 &
                                       ! pCPCalcium,                &
-                                        pCPIron,                   &
+                                      ! pCPIron,                   &
+                                        pCPZ,                      &
                                         vx,vy,vz,logHII,logcool)
     use localDefinitions
     implicit none
@@ -105,14 +110,15 @@ interface
     real(kind=RealKind), intent(in) :: x0, y0, z0
     real*4, intent(in) ::              logtgas, lognh, logxneu, vx,vy,vz,logHII,logcool
   ! real*4, intent(in) ::              pCPHelium
-    real*4, intent(in) ::              pCPCarbon
-    real*4, intent(in) ::              pCPNitrogen
-    real*4, intent(in) ::              pCPOxygen
-    real*4, intent(in) ::              pCPMagnesium
-    real*4, intent(in) ::              pCPSilicon
-    real*4, intent(in) ::              pCPSulfur
+  ! real*4, intent(in) ::              pCPCarbon
+  ! real*4, intent(in) ::              pCPNitrogen
+  ! real*4, intent(in) ::              pCPOxygen
+  ! real*4, intent(in) ::              pCPMagnesium
+  ! real*4, intent(in) ::              pCPSilicon
+  ! real*4, intent(in) ::              pCPSulfur
   ! real*4, intent(in) ::              pCPCalcium
-    real*4, intent(in) ::              pCPIron
+  ! real*4, intent(in) ::              pCPIron
+    real*4, intent(in) ::              pCPZ
     type(zoneType), target ::          ParentCell
   end subroutine placeCellProject
 end interface
@@ -145,6 +151,8 @@ print*, 'nlevels =', nlevels
 
 allocate(readLevel(nlevels))
 
+nmetals = 1 ! used to be 9
+
 do level = 1, nlevels
   read(14) readLevel(level)%ncell
   write(*,*) 'level =', level, readLevel(level)%ncell
@@ -153,7 +161,7 @@ do level = 1, nlevels
   allocate(readLevel(level)%lT(readLevel(level)%ncell))
   allocate(readLevel(level)%lnH(readLevel(level)%ncell))
   allocate(readLevel(level)%lx(readLevel(level)%ncell))
-  allocate(readLevel(level)%abun(readLevel(level)%ncell,9))
+  allocate(readLevel(level)%abun(readLevel(level)%ncell,nmetals))
   allocate(readLevel(level)%vel(readLevel(level)%ncell,3))
   allocate(readLevel(level)%LLY(readLevel(level)%ncell,2))
 
@@ -164,14 +172,15 @@ do level = 1, nlevels
   read(14) (readLevel(level)%lnH(icell),icell=1,readLevel(level)%ncell)
   read(14) (readLevel(level)%lx(icell),icell=1,readLevel(level)%ncell)
 ! read(14) (readLevel(level)%abun(icell,1),icell=1,readLevel(level)%ncell) !He
-  read(14) (readLevel(level)%abun(icell,2),icell=1,readLevel(level)%ncell) !C
-  read(14) (readLevel(level)%abun(icell,3),icell=1,readLevel(level)%ncell) !N
-  read(14) (readLevel(level)%abun(icell,4),icell=1,readLevel(level)%ncell) !O
-  read(14) (readLevel(level)%abun(icell,5),icell=1,readLevel(level)%ncell) !Mg
-  read(14) (readLevel(level)%abun(icell,6),icell=1,readLevel(level)%ncell) !Si
-  read(14) (readLevel(level)%abun(icell,7),icell=1,readLevel(level)%ncell) !S
+! read(14) (readLevel(level)%abun(icell,2),icell=1,readLevel(level)%ncell) !C
+! read(14) (readLevel(level)%abun(icell,3),icell=1,readLevel(level)%ncell) !N
+! read(14) (readLevel(level)%abun(icell,4),icell=1,readLevel(level)%ncell) !O
+! read(14) (readLevel(level)%abun(icell,5),icell=1,readLevel(level)%ncell) !Mg
+! read(14) (readLevel(level)%abun(icell,6),icell=1,readLevel(level)%ncell) !Si
+! read(14) (readLevel(level)%abun(icell,7),icell=1,readLevel(level)%ncell) !S
 ! read(14) (readLevel(level)%abun(icell,8),icell=1,readLevel(level)%ncell) !Ca
-  read(14) (readLevel(level)%abun(icell,9),icell=1,readLevel(level)%ncell) !Fe
+! read(14) (readLevel(level)%abun(icell,9),icell=1,readLevel(level)%ncell) !Fe
+  read(14) (readLevel(level)%abun(icell,1),icell=1,readLevel(level)%ncell) !Z
   read(14) (readLevel(level)%vel(icell,1),icell=1,readLevel(level)%ncell)
   read(14) (readLevel(level)%vel(icell,2),icell=1,readLevel(level)%ncell)
   read(14) (readLevel(level)%vel(icell,3),icell=1,readLevel(level)%ncell)
@@ -259,17 +268,18 @@ do i = 1, nx
          baseGrid%cell(i,j,k)%Hydrogen  = 0e0
          baseGrid%cell(i,j,k)%x         = 0e0
          baseGrid%cell(i,j,k)%HI        = 0e0
-         baseGrid%cell(i,j,k)%HeI       = 0e0
-         baseGrid%cell(i,j,k)%HeII      = 0e0
+       ! baseGrid%cell(i,j,k)%HeI       = 0e0
+       ! baseGrid%cell(i,j,k)%HeII      = 0e0
        ! baseGrid%cell(i,j,k)%Helium    = 0e0
-         baseGrid%cell(i,j,k)%Carbon    = 0e0
-         baseGrid%cell(i,j,k)%Nitrogen  = 0e0
-         baseGrid%cell(i,j,k)%Oxygen    = 0e0
-         baseGrid%cell(i,j,k)%Magnesium = 0e0
-         baseGrid%cell(i,j,k)%Silicon   = 0e0
-         baseGrid%cell(i,j,k)%Sulfur    = 0e0
+       ! baseGrid%cell(i,j,k)%Carbon    = 0e0
+       ! baseGrid%cell(i,j,k)%Nitrogen  = 0e0
+       ! baseGrid%cell(i,j,k)%Oxygen    = 0e0
+       ! baseGrid%cell(i,j,k)%Magnesium = 0e0
+       ! baseGrid%cell(i,j,k)%Silicon   = 0e0
+       ! baseGrid%cell(i,j,k)%Sulfur    = 0e0
        ! baseGrid%cell(i,j,k)%Calcium   = 0e0
-         baseGrid%cell(i,j,k)%Iron      = 0e0
+       ! baseGrid%cell(i,j,k)%Iron      = 0e0
+         baseGrid%cell(i,j,k)%Z         = 0e0
          baseGrid%cell(i,j,k)%logL_Lya_HII = -35.
          baseGrid%cell(i,j,k)%logL_Lya_cool= -35.
          baseGrid%cell(i,j,k)%V         = (/0e0,0e0,0e0/)
@@ -301,14 +311,15 @@ do level = 1, nlevels                           !For each level
                             readLevel(level)%lnH(icell),   &!
                             readLevel(level)%lx(icell),    &!
                           ! readLevel(level)%abun(icell,1),&! !He
-                            readLevel(level)%abun(icell,2),&! !C
-                            readLevel(level)%abun(icell,3),&! !N
-                            readLevel(level)%abun(icell,4),&! !O
-                            readLevel(level)%abun(icell,5),&! !Mg
-                            readLevel(level)%abun(icell,6),&! !Si
-                            readLevel(level)%abun(icell,7),&! !S
+                          ! readLevel(level)%abun(icell,2),&! !C
+                          ! readLevel(level)%abun(icell,3),&! !N
+                          ! readLevel(level)%abun(icell,4),&! !O
+                          ! readLevel(level)%abun(icell,5),&! !Mg
+                          ! readLevel(level)%abun(icell,6),&! !Si
+                          ! readLevel(level)%abun(icell,7),&! !S
                           ! readLevel(level)%abun(icell,8),&! !Ca
-                            readLevel(level)%abun(icell,9),&! !Fe
+                          ! readLevel(level)%abun(icell,9),&! !Fe
+                            readLevel(level)%abun(icell,1),&! !Z
                             readLevel(level)%vel(icell,1), &!
                             readLevel(level)%vel(icell,2), &!
                             readLevel(level)%vel(icell,3), &!
@@ -342,25 +353,25 @@ write(*,*) 'total number of cells =', ncosmic
 
   allocate (cellArrayLevel(ncosmic))
   allocate (cellArrayLevelORIG(ncosmic))
-  allocate (OrigArr(ncosmic))
   allocate (cellArrayXpos(ncosmic))
   allocate (DammitAlex(ncosmic))
   allocate (cellArrayYpos(ncosmic))
   allocate (cellArrayZpos(ncosmic))
   allocate (cellArrayHI(ncosmic))
-  allocate (cellArrayHeI(ncosmic))
-  allocate (cellArrayHeII(ncosmic))
+! allocate (cellArrayHeI(ncosmic))
+! allocate (cellArrayHeII(ncosmic))
   allocate (cellArrayHydrogen(ncosmic))
   allocate (cellArrayx(ncosmic))
 ! allocate (cellArrayHelium(ncosmic))
-  allocate (cellArrayCarbon(ncosmic))
-  allocate (cellArrayNitrogen(ncosmic))
-  allocate (cellArrayOxygen(ncosmic))
-  allocate (cellArrayMagnesium(ncosmic))
-  allocate (cellArraySilicon(ncosmic))
-  allocate (cellArraySulfur(ncosmic))
+! allocate (cellArrayCarbon(ncosmic))
+! allocate (cellArrayNitrogen(ncosmic))
+! allocate (cellArrayOxygen(ncosmic))
+! allocate (cellArrayMagnesium(ncosmic))
+! allocate (cellArraySilicon(ncosmic))
+! allocate (cellArraySulfur(ncosmic))
 ! allocate (cellArrayCalcium(ncosmic))
-  allocate (cellArrayIron(ncosmic))
+! allocate (cellArrayIron(ncosmic))
+  allocate (cellArrayZ(ncosmic))
   allocate (cellArrayTemp(ncosmic))
   allocate (cellArrayDensity(ncosmic))
   allocate (cellArrayXvel(ncosmic))
@@ -470,14 +481,15 @@ open(14,file=trim(fileout),status='replace',form='unformatted')
   write(14) (cellArrayYvel(i),          i=1,ncosmic) !in km/s
   write(14) (cellArrayZvel(i),          i=1,ncosmic) !in km/s
 ! write(14) (cellArrayHelium(i),        i=1,ncosmic)
-  write(14) (cellArrayCarbon(i),        i=1,ncosmic)
-  write(14) (cellArrayNitrogen(i),      i=1,ncosmic)
-  write(14) (cellArrayOxygen(i),        i=1,ncosmic)
-  write(14) (cellArrayMagnesium(i),     i=1,ncosmic)
-  write(14) (cellArraySilicon(i),       i=1,ncosmic)
-  write(14) (cellArraySulfur(i),        i=1,ncosmic)
+! write(14) (cellArrayCarbon(i),        i=1,ncosmic)
+! write(14) (cellArrayNitrogen(i),      i=1,ncosmic)
+! write(14) (cellArrayOxygen(i),        i=1,ncosmic)
+! write(14) (cellArrayMagnesium(i),     i=1,ncosmic)
+! write(14) (cellArraySilicon(i),       i=1,ncosmic)
+! write(14) (cellArraySulfur(i),        i=1,ncosmic)
 ! write(14) (cellArrayCalcium(i),       i=1,ncosmic)
-  write(14) (cellArrayIron(i),          i=1,ncosmic)
+! write(14) (cellArrayIron(i),          i=1,ncosmic)
+  write(14) (cellArrayZ(i),             i=1,ncosmic)
 ! write(14) (cellArrayHeI(i),           i=1,ncosmic)
 ! write(14) (cellArrayHeII(i),          i=1,ncosmic)
 close(14)
@@ -517,14 +529,15 @@ end program BuildAMR
 recursive subroutine placeCellProject(ParentCell,level,x0,y0,z0, &
                                       logtgas,lognh,logxneu,     &
                                     ! pCPHelium,                 &
-                                      pCPCarbon,                 &
-                                      pCPNitrogen,               &
-                                      pCPOxygen,                 &
-                                      pCPMagnesium,              &
-                                      pCPSilicon,                &
-                                      pCPSulfur,                 &
+                                    ! pCPCarbon,                 &
+                                    ! pCPNitrogen,               &
+                                    ! pCPOxygen,                 &
+                                    ! pCPMagnesium,              &
+                                    ! pCPSilicon,                &
+                                    ! pCPSulfur,                 &
                                     ! pCPCalcium,                &
-                                      pCPIron,                   &
+                                    ! pCPIron,                   &
+                                      pCPZ,                      &
                                       vx,vy,vz,logHII,logcool)
 
 use localDefinitions
@@ -535,15 +548,16 @@ integer ::                         inew, jnew, knew, i, j, k
 real(kind=RealKind), intent(in) :: x0, y0, z0
 real*4, intent(in) ::              logtgas, lognh, logxneu, vx,vy,vz,logHII,logcool
 ! real*4, intent(in) ::              pCPHelium
-  real*4, intent(in) ::              pCPCarbon
-  real*4, intent(in) ::              pCPNitrogen
-  real*4, intent(in) ::              pCPOxygen
-  real*4, intent(in) ::              pCPMagnesium
-  real*4, intent(in) ::              pCPSilicon
-  real*4, intent(in) ::              pCPSulfur
+! real*4, intent(in) ::              pCPCarbon
+! real*4, intent(in) ::              pCPNitrogen
+! real*4, intent(in) ::              pCPOxygen
+! real*4, intent(in) ::              pCPMagnesium
+! real*4, intent(in) ::              pCPSilicon
+! real*4, intent(in) ::              pCPSulfur
 ! real*4, intent(in) ::              pCPCalcium
-  real*4, intent(in) ::              pCPIron
-real(kind=RealKind) ::             xnew, ynew, znew, nh, xneu, nhe
+! real*4, intent(in) ::              pCPIron
+  real*4, intent(in) ::              pCPZ
+real(kind=RealKind) ::             xnew, ynew, znew, nh, xneu!, nhe
 type(zoneType), target ::          ParentCell
 real*8::                             dx
 integer::                          L
@@ -562,17 +576,18 @@ if (level.gt.1) then
                ParentCell%cell(i,j,k)%Hydrogen  = ParentCell%Hydrogen
                ParentCell%cell(i,j,k)%x         = ParentCell%x  
                ParentCell%cell(i,j,k)%HI        = ParentCell%HI
-               ParentCell%cell(i,j,k)%HeI       = ParentCell%HeI
-               ParentCell%cell(i,j,k)%HeII      = ParentCell%HeII
+             ! ParentCell%cell(i,j,k)%HeI       = ParentCell%HeI
+             ! ParentCell%cell(i,j,k)%HeII      = ParentCell%HeII
              ! ParentCell%cell(i,j,k)%Helium    = ParentCell%Helium   
-               ParentCell%cell(i,j,k)%Carbon    = ParentCell%Carbon   
-               ParentCell%cell(i,j,k)%Nitrogen  = ParentCell%Nitrogen 
-               ParentCell%cell(i,j,k)%Oxygen    = ParentCell%Oxygen   
-               ParentCell%cell(i,j,k)%Magnesium = ParentCell%Magnesium
-               ParentCell%cell(i,j,k)%Silicon   = ParentCell%Silicon  
-               ParentCell%cell(i,j,k)%Sulfur    = ParentCell%Sulfur   
+             ! ParentCell%cell(i,j,k)%Carbon    = ParentCell%Carbon   
+             ! ParentCell%cell(i,j,k)%Nitrogen  = ParentCell%Nitrogen 
+             ! ParentCell%cell(i,j,k)%Oxygen    = ParentCell%Oxygen   
+             ! ParentCell%cell(i,j,k)%Magnesium = ParentCell%Magnesium
+             ! ParentCell%cell(i,j,k)%Silicon   = ParentCell%Silicon  
+             ! ParentCell%cell(i,j,k)%Sulfur    = ParentCell%Sulfur   
              ! ParentCell%cell(i,j,k)%Calcium   = ParentCell%Calcium  
-               ParentCell%cell(i,j,k)%Iron      = ParentCell%Iron     
+             ! ParentCell%cell(i,j,k)%Iron      = ParentCell%Iron     
+               ParentCell%cell(i,j,k)%Z         = ParentCell%Z
                ParentCell%cell(i,j,k)%logL_Lya_HII = ParentCell%logL_Lya_HII
                ParentCell%cell(i,j,k)%logL_Lya_cool= ParentCell%logL_Lya_cool
                ParentCell%cell(i,j,k)%V         = ParentCell%V
@@ -608,14 +623,15 @@ if (level.gt.1) then
    call placeCellProject(ParentCell%cell(inew,jnew,knew),level-1, &
         xnew,ynew,znew,logtgas,lognh,logxneu,                     &
                                      ! pCPHelium,                 &
-                                       pCPCarbon,                 &
-                                       pCPNitrogen,               &
-                                       pCPOxygen,                 &
-                                       pCPMagnesium,              &
-                                       pCPSilicon,                &
-                                       pCPSulfur,                 &
+                                     ! pCPCarbon,                 &
+                                     ! pCPNitrogen,               &
+                                     ! pCPOxygen,                 &
+                                     ! pCPMagnesium,              &
+                                     ! pCPSilicon,                &
+                                     ! pCPSulfur,                 &
                                      ! pCPCalcium,                &
-                                       pCPIron,                   &
+                                     ! pCPIron,                   &
+                                       pCPZ,                      &
                                        vx,vy,vz,logHII,logcool)
 else
    ParentCell%tgas      = 10.**logtgas
@@ -625,18 +641,19 @@ else
    ParentCell%Hydrogen  = nh
    ParentCell%x         = xneu
    ParentCell%HI        = nh * xneu
-   nhe                  = (1.-psi) * ParentCell%rho / mhe
-   ParentCell%HeI       = nhe * 1.
-   ParentCell%HeII      = nhe * 0.
+ ! nhe                  = (1.-psi) * ParentCell%rho / mhe
+ ! ParentCell%HeI       = nhe * 1.
+ ! ParentCell%HeII      = nhe * 0.
  ! ParentCell%Helium    = pCPHelium
-   ParentCell%Carbon    = pCPCarbon
-   ParentCell%Nitrogen  = pCPNitrogen
-   ParentCell%Oxygen    = pCPOxygen
-   ParentCell%Magnesium = pCPMagnesium
-   ParentCell%Silicon   = pCPSilicon
-   ParentCell%Sulfur    = pCPSulfur
+ ! ParentCell%Carbon    = pCPCarbon
+ ! ParentCell%Nitrogen  = pCPNitrogen
+ ! ParentCell%Oxygen    = pCPOxygen
+ ! ParentCell%Magnesium = pCPMagnesium
+ ! ParentCell%Silicon   = pCPSilicon
+ ! ParentCell%Sulfur    = pCPSulfur
  ! ParentCell%Calcium   = pCPCalcium
-   ParentCell%Iron      = pCPIron
+ ! ParentCell%Iron      = pCPIron
+   ParentCell%Z         = pCPZ
    ParentCell%V(1)      = vx
    ParentCell%V(2)      = vy
    ParentCell%V(3)      = vz
@@ -694,17 +711,18 @@ else
    icosmic = icosmic + 1
    cellArrayLevel(icosmic)     = level
    cellArrayHI(icosmic)        = real(currentCell%HI)
-   cellArrayHeI(icosmic)       = real(currentCell%HeI)
-   cellArrayHeII(icosmic)      = real(currentCell%HeII)
+ ! cellArrayHeI(icosmic)       = real(currentCell%HeI)
+ ! cellArrayHeII(icosmic)      = real(currentCell%HeII)
  ! cellArrayHelium(icosmic)    = real(currentCell%Helium)
-   cellArrayCarbon(icosmic)    = real(currentCell%Carbon)
-   cellArrayNitrogen(icosmic)  = real(currentCell%Nitrogen)
-   cellArrayOxygen(icosmic)    = real(currentCell%Oxygen)
-   cellArrayMagnesium(icosmic) = real(currentCell%Magnesium)
-   cellArraySilicon(icosmic)   = real(currentCell%Silicon)
-   cellArraySulfur(icosmic)    = real(currentCell%Sulfur)
+ ! cellArrayCarbon(icosmic)    = real(currentCell%Carbon)
+ ! cellArrayNitrogen(icosmic)  = real(currentCell%Nitrogen)
+ ! cellArrayOxygen(icosmic)    = real(currentCell%Oxygen)
+ ! cellArrayMagnesium(icosmic) = real(currentCell%Magnesium)
+ ! cellArraySilicon(icosmic)   = real(currentCell%Silicon)
+ ! cellArraySulfur(icosmic)    = real(currentCell%Sulfur)
  ! cellArrayCalcium(icosmic)   = real(currentCell%Calcium)
-   cellArrayIron(icosmic)      = real(currentCell%Iron)
+ ! cellArrayIron(icosmic)      = real(currentCell%Iron)
+   cellArrayZ(icosmic)         = real(currentCell%Z)
    cellArrayTemp(icosmic)      = real(currentCell%tgas)
    cellArrayDensity(icosmic)   = real(currentCell%rho)
    cellArrayHydrogen(icosmic)  = real(currentCell%Hydrogen)

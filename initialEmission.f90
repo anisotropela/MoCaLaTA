@@ -15,16 +15,16 @@ real*4,    dimension(:), pointer:: logLya,logFUV
 real*8,    dimension(:), pointer:: L_LyaString,L_FUVString
 real*4,    dimension(:), pointer:: WeightStringL,WeightStringF
 
-real*4,    dimension(:), pointer::                  &
-                                 ! HeliumString,    &
-                                   CarbonString,    &
-                                   NitrogenString,  &
-                                   OxygenString,    &
-                                   MagnesiumString, &
-                                   SiliconString,   &
-                                   SulfurString,    &
-                                 ! CalciumString,   &
-                                   IronString
+! real*4,    dimension(:), pointer::                  &
+!                                  ! HeliumString,    &
+!                                    CarbonString,    &
+!                                    NitrogenString,  &
+!                                    OxygenString,    &
+!                                    MagnesiumString, &
+!                                    SiliconString,   &
+!                                    SulfurString,    &
+!                                  ! CalciumString,   &
+!                                    IronString
 
 real*4,    dimension(:), pointer:: Dnu_DString
 real*4,    dimension(:), pointer:: U_xString, U_yString, U_zString
@@ -129,7 +129,7 @@ call ReadInput
 call ReadData
 call CalcDX
 call FindInitPos
-call SumMetals
+!call SumMetals
 call WriteData
 
 end program initialEmission
@@ -228,14 +228,15 @@ allocate(V_xString(N_cells))
 allocate(V_yString(N_cells))
 allocate(V_zString(N_cells))
 !allocate(HeliumString(N_cells))
-allocate(CarbonString(N_cells))
-allocate(NitrogenString(N_cells))
-allocate(OxygenString(N_cells))
-allocate(MagnesiumString(N_cells))
-allocate(SiliconString(N_cells))
-allocate(SulfurString(N_cells))
+!allocate(CarbonString(N_cells))
+!allocate(NitrogenString(N_cells))
+!allocate(OxygenString(N_cells))
+!allocate(MagnesiumString(N_cells))
+!allocate(SiliconString(N_cells))
+!allocate(SulfurString(N_cells))
 !allocate(CalciumString(N_cells))
-allocate(IronString(N_cells))
+!allocate(IronString(N_cells))
+allocate(MetalString(N_cells))
 
 read(14) (LevelString(i), i=1,N_cells)! 0 - 7
 read(14) (XString(i),     i=1,N_cells)! [0,D_box] in kpc
@@ -273,14 +274,15 @@ read(14) (V_xString(i),       i=1,N_cells)! km/s
 read(14) (V_yString(i),       i=1,N_cells)! km/s
 read(14) (V_zString(i),       i=1,N_cells)! km/s
 !read(14)(HeliumString(i),    i=1,N_cells)
-read(14) (CarbonString(i),    i=1,N_cells)
-read(14) (NitrogenString(i),  i=1,N_cells)
-read(14) (OxygenString(i),    i=1,N_cells)
-read(14) (MagnesiumString(i), i=1,N_cells)
-read(14) (SiliconString(i),   i=1,N_cells)
-read(14) (SulfurString(i),    i=1,N_cells)
+!read(14) (CarbonString(i),    i=1,N_cells)
+!read(14) (NitrogenString(i),  i=1,N_cells)
+!read(14) (OxygenString(i),    i=1,N_cells)
+!read(14) (MagnesiumString(i), i=1,N_cells)
+!read(14) (SiliconString(i),   i=1,N_cells)
+!read(14) (SulfurString(i),    i=1,N_cells)
 !read(14)(CalciumString(i),   i=1,N_cells)
-read(14) (IronString(i),      i=1,N_cells)
+!read(14) (IronString(i),      i=1,N_cells)
+read(14) (MetalString(i), i=1,N_cells)
 close(14)
 
 !do i = 1,N_cells
@@ -623,39 +625,39 @@ end subroutine FindInitPos
 
 !------------------------------------------------------------------------------
 
-subroutine SumMetals
-
-use DataArrays
-use GlobalData
-use PhysicalConstants
-
-implicit none
-integer:: j,L
-real*8::  Z,Z_sol,R
-
-print*, 'Summing metals...'
-
-allocate(MetalString(N_cells))
-
-Z_sol =  Z_C + Z_N + Z_O + Z_Mg + Z_Si + Z_S + Z_Fe !+ Z_Ca
-
-do j = 1,N_cells
-  Z = CarbonString(j)    * Z_C   &
-    + NitrogenString(j)  * Z_N   &
-    + OxygenString(j)    * Z_O   &
-    + MagnesiumString(j) * Z_Mg  &
-    + SiliconString(j)   * Z_Si  &
-    + SulfurString(j)    * Z_S   &
-!   + CalciumString(j)   * Z_Ca  &
-    + IronString(j)      * Z_Fe   
-
-  MetalString(j) = Z / Z_sol
-! call random_number(R)
-! if (R.lt..005) write(1,*) Z
-enddo
-
-end subroutine SumMetals
-
+! subroutine SumMetals
+! 
+! use DataArrays
+! use GlobalData
+! use PhysicalConstants
+! 
+! implicit none
+! integer:: j,L
+! real*8::  Z,Z_sol,R
+! 
+! print*, 'Summing metals...'
+! 
+! allocate(MetalString(N_cells))
+! 
+! Z_sol =  Z_C + Z_N + Z_O + Z_Mg + Z_Si + Z_S + Z_Fe !+ Z_Ca
+! 
+! do j = 1,N_cells
+!   Z = CarbonString(j)    * Z_C   &
+!     + NitrogenString(j)  * Z_N   &
+!     + OxygenString(j)    * Z_O   &
+!     + MagnesiumString(j) * Z_Mg  &
+!     + SiliconString(j)   * Z_Si  &
+!     + SulfurString(j)    * Z_S   &
+! !   + CalciumString(j)   * Z_Ca  &
+!     + IronString(j)      * Z_Fe   
+! 
+!   MetalString(j) = Z / Z_sol
+! ! call random_number(R)
+! ! if (R.lt..005) write(1,*) Z
+! enddo
+! 
+! end subroutine SumMetals
+! 
 !------------------------------------------------------------------------------
 
 subroutine holdon(t)

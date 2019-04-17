@@ -25,7 +25,7 @@ program mkSPLASHtestgrids
   real(dp)::              xcell(3)
   real(dp)::              NcolHI,nHI,nHII,T,Vout,starLya,coolLya,Z
 
-  f = 'formatted'               !'formatted' or 'unformatted' output
+  f = 'unformatted'               !'formatted' or 'unformatted' output
 
   ! Set physical values
   ni      = 10                  !Resolution

@@ -1,12 +1,12 @@
 # Value                              | Variable     | Explanation
 20.                                  # Lbox         : Box size / kpc
 'testdir/Jespers.bin'                # jesperfile   : Output file, readable by BuildAMR.f90
-'testdir/SPLASHtestgrid_nHI.dat'     # nHIfile      : HI number density / cm-3
-'testdir/SPLASHtestgrid_T.dat'       # Tfile        : Temperature / K
-'testdir/SPLASHtestgrid_vx.dat'      # vxfile       : \
-'testdir/SPLASHtestgrid_vy.dat'      # vyfile       :  > Bulk velocity / km/s
-'testdir/SPLASHtestgrid_vz.dat'      # vzfile       : /
-'testdir/SPLASHtestgrid_starLya.dat' # starLyafile  : Lya luminosity from stars / erg/s (or just s-1)
-'testdir/SPLASHtestgrid_coolLya.dat' # coolLyafile  : Lya luminosity from cooling / erg/s (or just s-1)
-'testdir/SPLASHtestgrid_nHII.dat'    # nHIIfile     : HII number density / cm-3
-'testdir/SPLASHtestgrid_Z.dat'       # Zfile        : Metallicity / Zsun
+'testdir/SPLASHtestgrid_nHI.bin'     # nHIfile      : HI number density / cm-3
+'testdir/SPLASHtestgrid_T.bin'       # Tfile        : Temperature / K
+'testdir/SPLASHtestgrid_vx.bin'      # vxfile       : \
+'testdir/SPLASHtestgrid_vy.bin'      # vyfile       :  > Bulk velocity / km/s
+'testdir/SPLASHtestgrid_vz.bin'      # vzfile       : /
+'testdir/SPLASHtestgrid_starLya.bin' # starLyafile  : Lya luminosity from stars / erg/s (or just s-1)
+'testdir/SPLASHtestgrid_coolLya.bin' # coolLyafile  : Lya luminosity from cooling / erg/s (or just s-1)
+'testdir/SPLASHtestgrid_nHII.bin'    # nHIIfile     : HII number density / cm-3
+'testdir/SPLASHtestgrid_Z.bin'       # Zfile        : Metallicity / Zsun
