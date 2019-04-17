@@ -263,8 +263,8 @@ enddo
  enddo
  L_Lya    = sum(L_LyaString)
  L_FUV_Hz = sum(L_FUVString)
- write(*,'(a24,f5.0,a7,es16.9)') 'L_Lya,tot inside D_emit (', D_emit, ' kpc): ', L_Lya
- write(*,'(a24,f5.0,a7,es16.9)') 'L_FUV_Hz,tot inside D_emit (', D_emit, ' kpc): ', L_FUV_Hz
+ write(*,'(a28,f6.0,a7,es16.9)') 'L_Lya,tot inside D_emit    (', D_emit, ' kpc): ', L_Lya
+ write(*,'(a28,f6.0,a7,es16.9)') 'L_FUV_Hz,tot inside D_emit (', D_emit, ' kpc): ', L_FUV_Hz
 
 read(14) (rhoString(i),       i=1,N_cells)
 read(14) (n_HString(i),       i=1,N_cells)
