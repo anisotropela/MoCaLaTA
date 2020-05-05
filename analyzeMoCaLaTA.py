@@ -160,7 +160,7 @@ def readMoCaLaTA(filename,
         rec5     = np.fromfile(file=binfile, dtype=dt5, count=1)
         IFU      = rec5['IFU'][0].reshape(CCDshape, order='F')
         IFU      = IFU / par['n_eff']                #Now sum(IFU) = fesc
-        print('IFU  =', IFU.sum())
+      # print('IFU  =', IFU.sum())
         IFU      = IFU * par['Ltot']                 #Scale to luminosity
         IFU      = IFU / (4*pi*par['dL']**2)         #Convert to flux
         IFU      = IFU / par['dlam2'] / par['dOmega']#-"- flux density per area
