@@ -1,0 +1,90 @@
+
+#     Value             |  Variable |Type| Description
+
+'multiphase'            # model     |  C |
+
+# I/O
+'/Users/pela/Projects/pasquierPDLA/' # DataDir   |  C | Mother directory
+'models/'               # Subdir    |  C | Subdirectory with with input file
+'fiducial_par.bin'        # ParData   |  C | Particle data
+'fiducial_par.dat'        # pardat    |  C | Particle data, formatted for visualization; '' to omit
+'fiducial_cell.bin'       # CellData  |  C | Cell data; levels, phases, and associated clouds
+'fiducial_cell.dat'       # celldat   |  C | Cell data, formatted for visualization; '' to omit
+1000                    # wrtph     |  I | Print to std. output for every wrtph photon
+10000                   # wrtfl     |  I | Write file for every wrtfl photon
+'_fiducial'             # outlabel  |  C | Label for main output files
+''                      # specin    |  C | -"- for input spectrum in Doppler widths; '' to omit
+''                      # specout   |  C | -"- for output spectrum in Doppler widths; '' to omit
+
+# Observations
+1200. 1230.             # BW        | 2D | Wavelength interval bounds in Angstrom
+128                     # pxl       |  I | # of pixels/side in CCD
+150                     # SpecRes1D |  I | Resolution of 1D spectrum; bins
+150                     # SpecRes2D |  I | Resolution of 2D spectrum; bins
+T F F F T F             # WhichCCDs | 6L | (xp,xm,yp,ym,zp,zm)
+
+# Simulation
+100                     # ni        |  I | \   
+100                     # nj        |  I |  >- Base grid resolution, x,y,z-dir
+100                     # nk        |  I | /   Currently, this must be 2,2,2
+20.                     # D_box     |  D | Box size in kpc
+20.                     # D_obs     |  d | Side length of area covered by CCD (centered on box center)
+1000000                 # n_phtot   |  I | Total # of photons; Lya + cont.
+1.                    # SFR       |  d | Star formation rate in Msun/yr (sets normalization)
+13.                         # EW_int    |  D | Intrinsic EW in Angstrom
+'intrinsic'             # x_critType|  C | 'intrinsic', 'global', '<value>', or 'max<value>', where <value> is a real number
+'spectrum_intrinsic_rest.dat' #'fwhm2870'              # x_injType |  C | 'proper', 'fwhm<value/kms>', 'x<value>', or '<user_input_spec>.dat'
+'central'               # X_init    |  C | Initial position: 'lumdep', 'central', 'homo', 'grad<value>' with <value> in kpc, or '(x y z)', with x,y,z given in terms of D_box
+'iso'                   # n_init    |  C | Initial direction: 'iso' or '(nx ny nz)'
+0.                      # CloudCorr |  D | Emission cloud correlation factor ([0,1], where 0 is "no emission from clouds" and 1 is "no emission from ICM")
+T                       # TrueRan   |  L | Use "true" random number (given by current date and time)?
+10000                   # N_los     |  I | # of sightlines for calculating average quantities (0 => don't calculate)
+F                       # writeN0   |  L | Write N0 (# of cloud scattering)?
+10                      # dpc       |  D | Dots per clouds in particle representation
+
+# Galaxy
+10.                     # r_gal     |  D | Maximum radius of galaxy; n_HI is set to 0 in [r_gal,r_inner]
+1 1 1                   # axes      | 3D | Ellipsoid radii in term of r_gal
+1e4                     # H1        |  D | Jet  <!-- Disk scale length in plane -->
+1.                      # exp1      |  D | Density gradient exponent in plane
+.1                      # H2        |  D | Galaxy <!-- Disk scale height perpendicular to plane -->
+.01                      # exp2      |  D | Density gradient exponent perp. to plane
+750000                  # N_cl      |  I | # of clouds
+0.02                    # rmin      |  D | Minimum cloud radius in kpc
+0.02                    # rmax      |  D | Maximum cloud radius in kpc
+2d0                     # beta      |  D | Cloud radius distribution power law slope
+T                       # followGrad|  L | Should cloud density follow galactic density gradient?
+1e4                     # T_cl      |  D | Cloud gas temperature
+.5                      # n_HI_cl   |  D | Cloud neutral hydrogen density (.32407793 with r_cl = 0.1 kpc corresponds to N_HI = 1e20 from clouds center to surface)
+.5                      # Z_cl      |  D | Cloud metallicity in terms of Solar
+10.                     # sigV_cl   | 3D | Velocity dispersion standard deviation of clouds in km/s
+1e5                     # T_ICM     |  D | ICM gas temperature
+.01                     # n_HI_ICM  |  D | ICM neutral hydrogen density in the center
+.5                      # Z_ICM     |  D | ICM metallicity in terms of Solar
+0.                      # V_in      |  D | Cloud and ICM infall velocity in km/s (>0 for outflow)
+
+# Wind
+8.                      # r_inner   |  D | Radius of inner shell in kpc (or cells if preceded by a minus)
+10.                     # r_outer   |  D | Radius of outer shell     -- " --
+666d66                  # n_HI_ICMsh|  D | HI density in shell
+666d66                  # Z_sh      |  D | Shell metallicity in terms of Solar
+666d66                  # T_sh      |  D | Shell gas temperature
+200.                    # V_out     |  D | Outflow velocity in km/s (>0 for collapse)
+'Vend0'                 # Vprof     |  L | Velocity profile: 'momentum', 'linear', or 'constant'
+45.                     # OA        |  D | (Full) opening angle in degrees
+0 .305 .952             # n_jet     | 3D | Direction of one of the jets (the other is opposite)
+
+# Gas and dust
+F                       # recoil    |  L | Include atom recoil?
+'SMC'                   # DustType  |  C | 'SMC', 'LMC', or fixed cross section per hydrogen nucleus, e.g. '1.03e-21'
+.32                     # albedo    |  D | Dust albedo
+.73                     # g         |  D | Dust scattering asymmetry parameter
+
+# Background QSO
+'nil'                   # X_QSO     |  C | QSO position in kpc (box center is [0,0,0]) => calulate N_HI from X_QSO through box
+
+# Cosmology
+2.631                   # z         |  D | Redshift of snapshot
+67.7                    # H_0       |  D | Hubble constant, km/s/Mpc
+.307                    # Omega_M   |  D | Matter density parameter
+.693                    # Omega_L   |  D | Dark energy density parameter
