@@ -52,6 +52,8 @@ module PhysicalConstants
   real(dp),parameter:: tpi      = 2 * pi                                          !6.28318530717959!2pi
   real(dp),parameter:: sqpi     = sqrt(pi)                                        !1.77245385090552!sqrt(pi)
   real(dp),parameter:: sd2FW    = 2 * sqrt(2 * log(2d0))                          !2.354820046
+  real(dp),parameter:: ee       = exp(1d0)
+  real(dp),parameter:: sqrte    = sqrt(ee)
 end module PhysicalConstants
 
 !------------------------------------------------------------------------------
@@ -110,7 +112,7 @@ module GlobalData
   integer::             ni,nj,nk                !Base grid resolution
   integer::             wrtph,wrtfl
   integer::             BaseRes(3)
-  real(dp)::            dx0,dy0,dz0,dxTiny,dxWeeny!Base grid cell size / negligible distance
+  real(dp)::            dmin,dx0,dy0,dz0,dxTiny,dxWeeny!Base grid cell size / negligible distance
   real(dp)::            z_0                     !Half thickness of slab/cube/sphere
   real(dp),allocatable,&
          dimension(:):: dx,dxH,dy,dyH,dz,dzH    !Cell size / Half cell size
@@ -130,7 +132,7 @@ module GlobalData
   real(dp)::            D_box,R_box             !Phys. size/half size of Box
   real(dp)::            r_gal,axes(3)           !Radius of model galaxy, ellipsoid axes in terms of r_gal
   real(dp)::            r_inner,r_outer         !Inner and outer radius of shell
-  real(dp)::            H1,H2,exp1,exp2,H_lum(3)!Scale height and exp. factor of model galaxy along and perp. to plane (dens. propto exp((r/H1,2)^exp1,2))
+  real(dp)::            H1,H2,exp1,exp2,H_lum(3)!Scale height and exp. factor of model galaxy along and perp. to plane (dens. propto exp((-r/H1,2)^exp1,2))
   real(dp)::            CloudCorr               !Emission cloud correlation factor ([0,1], where 0 is "no emission from clouds" and 1 is "no emission from ICM")
   real(dp)::            OA,cosOAb2sq,n_jet(3)   !Wind openening angle and direction
   real(dp)::            X_QSO(3)                !Background QSO position
@@ -156,13 +158,17 @@ module GlobalData
   integer,allocatable:: FullPathArray(:,:)
   character(len=200)::  DataDir,Subdir,CellData !Data directories
   character(len=200)::  Cloudfile,Windfile      !File for writing cloud positions
-  character(len=200)::  parfile                 !Input parameter file
+  character(len=200)::  parfile,x_injType       !Input parameter file
   character(len=50)::   model                   !
-  character(len=20)::   DustType,x_injType,x_critType,Vprof
+  character(len=20)::   DustType,x_critType,Vprof
   real(dp)::            userXsecD,x_inj,sigma_V
   real(dp)::            atA(10),xcA(20),fescxc(10,20)!Tables for core escape probabilities
   real(dp)::            dat,dxc                 !Steps in above tables
   real(dp)::            Clumpiness              !Clumpiness factor
+  real(dp),allocatable,&
+    dimension(:)::      lam_user,flux_user,nu_user,cdf_flux,dlam_user,&
+                        dlam_up,dlam_down       !For user-defined input spectrum
+  integer::             nlines
 end module GlobalData
 
 !------------------------------------------------------------------------------
@@ -873,7 +879,11 @@ call CalcHImass((/1.04_dp,2.25_dp,-0.34_dp/), 16.7_dp)
 
 if (N_los .gt. 0) then
   if (abs(axes(1)-axes(2)).lt.1e-4 .and. abs(axes(1)-axes(3)).lt.1e-4) then
-    call CalcAverageQuantities('all')
+    if (abs(OA).lt.1e-6) then
+      call CalcAverageQuantities('all')
+    else
+      call CalcAverageQuantities('jet')
+    endif
   else
     call CalcAverageQuantities('xyz')
   endif
@@ -931,7 +941,7 @@ do n = 1,n_phtot                                !Loop over every photon
   call InitDir(nhat_i)                          !Emit isotropically
   call InitTau(tau)                             !Optical depth that photon will reach
   call InitFreq(Dnu_D,nhat_i,x,photon,U_bulk)   !Assign initial frequency
-  if (len_trim(specin).gt.0) call sample(inlun,x,nhat_i,U_bulk,Dnu_D,X_pos,dist,photon)
+! if (len_trim(specin).gt.0) call sample(inlun,x,nhat_i,U_bulk,Dnu_D,X_pos,dist,photon)
 
   sigma_x = sigma(Dnu_D,x)                      !Atomic cross section
 # ifdef dust
@@ -1231,6 +1241,7 @@ do i = 1,ni
 enddo
 # endif
 
+dmin = 0
 if (trim(model) .eq. 'multiphase') then 
   do i = 1,ni
     do j = 1,nj
@@ -1453,12 +1464,16 @@ do ic = 1,ncycles
                               !     n_eff(photon) afterwards (look in InitPos...)
       call CentralEmission(X_pos)
       call IsoDir(nhat)
-    elseif (dir .eq. 'xyz') then
+    elseif (dir .eq. 'jet') then                !Emit in jet only
+      call CentralEmission(X_pos)
+      call JetDir(n_jet,OA,nhat)
+    ! call JetDir((/1d0,-1d0,0d0/),OA,nhat)
+    elseif (dir .eq. 'xyz') then                !Emit from xyz position
       call NearCentralEmission(ic,X_pos)
       call MonteCarlo(R1)
       nhat     = (/0,0,0/)
       nhat(ic) = merge(-1,1,R1.gt..5)
-    elseif (dir .eq. 'qso') then
+    elseif (dir .eq. 'qso') then                !"Emit" from background QSO
       X_pos = X_QSO
     else
       stop 'What... what direction...?'
@@ -1504,7 +1519,6 @@ do ic = 1,ncycles
       call GetCellData(HostCell,DirVec)!,oldCell,DirVec)
       call LorentzTransform(x,nhat,oldCell,HostCell)
     enddo
-! print*, ccc
   enddo
 
   ari_t0    = sum(t0)    / N_los
@@ -1728,7 +1742,7 @@ contains
       L     = CurrentCell%Level
       V     = dx(L) * dy(L) * dz(L)             !Cell volume in cm3
       n_HI  = CurrentCell%n_HI                  !Cell HI density
-      if (L.gt.4) write(1,*) (X-R_box- X_cen*kpc)/kpc, L, n_HI, V
+    ! if (L.gt.4) write(1,*) (X-R_box- X_cen*kpc)/kpc, L, n_HI, V
       M_HIi = V * n_HI * m_H                    !Total HI mass in current cell
       M_HI  = M_HI + M_HIi                      !Accumulated galaxy HI mass so far
 ! #     ifdef dust
@@ -2028,6 +2042,34 @@ C(2) = A(3)*B(1) - A(1)*B(3)
 C(3) = A(1)*B(2) - A(2)*B(1)
 
 end subroutine CrossProduct
+
+!------------------------------------------------------------------------------
+
+subroutine cum_spec
+
+use kinds
+use GlobalData
+
+!Cumulate user-given flux
+
+implicit none
+integer:: n
+
+allocate(cdf_flux(nlines))
+
+cdf_flux(1) = flux_user(1)
+do n = 2,nlines
+  cdf_flux(n) = cdf_flux(n-1) + flux_user(n)
+enddo
+
+cdf_flux = cdf_flux / sum(flux_user)
+
+! do n = 1,nlines
+!   print*, n,lam_user(n)*1e8,cdf_flux(n)
+! enddo
+! stop
+
+end subroutine cum_spec
 
 !------------------------------------------------------------------------------
 
@@ -2747,38 +2789,63 @@ implicit none
 real(dp),intent(in)::  Dnu_D,nhat_i(3),U_bulk(3)
 integer,intent(in)::   photon
 real(dp),intent(out):: x
-real(dp)::             R,R3(3),nu,v,lam
+real(dp)::             R,R3(3),dR,nu,v,lam
+integer::              ilam
 
 trueFUV = .false.
 
-if (photon .eq. 1) then                         !Lya photon
-  if (trim(x_injType) .eq. 'proper') then
-    call gasdev(R3)
-    U    = R3 / sqrt(2d0)                       !=> f(x) = exp(-x^2) / sqrt(pi)
-    u_II = dot_product(U,nhat_i)
-    call MonteCarlo(R)
-    x = a*tan(pi*R + pi/a) + u_II               !=> Voigt
-  elseif (trim(x_injType) .eq. 'fixtgauss') then
-    call gasdev(R)
-    v = R * sigma_V ! DON'T divide by sqrt(2)
-    x = v2u(v,Dnu_D)
-  elseif (trim(x_injType) .eq. 'x_inj') then
-    x = x_inj
-  else
-    write(*,*) 'x_injType error in "InitFreq":', x_injType
-    stop
-  endif
-elseif (photon .eq. 2) then                         !FUV photon
+if (x_injType .eq. 'user') then
   call MonteCarlo(R)
-  nu  = nu1 + R * (nu2-nu1)
+! R = .6666666667d0
+  do ilam = 1,nlines
+    if (cdf_flux(ilam) .gt. R) exit
+  enddo
+! print*, 'ilam ',ilam
+! lam  = lam_user(ilam-1) ! cm
+! print*, 'lam  ',lam*1e8
+! dR = R - cdf_flux(ilam)
+! print*, 'cdf_flux ',cdf_flux(ilam)
+! dR = cdf_flux(ilam) - R
+! dR = R - cdf_flux(ilam-1)
+! print*, 'dR   ',dR
+! print*, 'dlam_user    ',dlam_user(ilam)*1e8
+! lam = lam_user(ilam-1) + .5*dlam_user(ilam-1) + dR*dlam_user(ilam)
+! print*, 'lam  ',lam*1e8
+  lam = lam_user(ilam)
+! print*, 'lam  ',R,ilam,lam
+  nu  = c / lam
   x   = (nu - nu_0) / Dnu_D
-  lam = c/nu / 1d8
-  if (photon.eq.2 .and. abs(lam-lambda_0).gt.NBaper) then
-    n_FUV   = n_FUV + 1d0
-    trueFUV = .true.
-  endif
+! stop
 else
-  stop 'Unknown photon'
+  if (photon .eq. 1) then                         !Lya photon
+    if (trim(x_injType) .eq. 'proper') then
+      call gasdev(R3)
+      U    = R3 / sqrt(2d0)                       !=> f(x) = exp(-x^2) / sqrt(pi)
+      u_II = dot_product(U,nhat_i)
+      call MonteCarlo(R)
+      x = a*tan(pi*R + pi/a) + u_II               !=> Voigt
+    elseif (trim(x_injType) .eq. 'fixtgauss') then
+      call gasdev(R)
+      v = R * sigma_V ! DON'T divide by sqrt(2)
+      x = v2u(v,Dnu_D)
+    elseif (trim(x_injType) .eq. 'x_inj') then
+      x = x_inj
+    else
+      write(*,*) 'x_injType error in "InitFreq":', x_injType
+      stop
+    endif
+  elseif (photon .eq. 2) then                         !FUV photon
+    call MonteCarlo(R)
+    nu  = nu1 + R * (nu2-nu1)
+    x   = (nu - nu_0) / Dnu_D
+    lam = c/nu / 1d8
+    if (photon.eq.2 .and. abs(lam-lambda_0).gt.NBaper) then
+      n_FUV   = n_FUV + 1d0
+      trueFUV = .true.
+    endif
+  else
+    stop 'Unknown photon'
+  endif
 endif
 
 end subroutine InitFreq
@@ -2925,6 +2992,69 @@ end subroutine InitTau
 
 !------------------------------------------------------------------------------
 
+subroutine insideCone(x,n,h,r,p,inside)
+
+!Check if a point `p` is inside a cone given by
+!  x:  apex (tip of the cone)
+!  n:  direction vector, pointing from `x` to the base
+!  h:  height
+!  r:  base radius
+!
+!Return logical `inside` with T if `p` is inside cone, F otherwise.
+
+use kinds
+
+implicit none
+real(dp),intent(in):: x(3),n(3),h,r,p(3)
+logical,intent(out):: inside
+real(dp)::            d_along_axis,r_at_p,d_to_axis,norm,nn(3)
+
+nn = n / norm(n)                                !Make sure n is normalized
+d_along_axis = dot_product(p-x, nn)             !Distance from tip to p's projection onto axis
+
+if ((d_along_axis.lt.0) .or. (d_along_axis.gt.h)) then !No need to check if above or below cone
+  inside = .false.
+else
+  r_at_p    = d_along_axis/h * r                     !Cone radius at p
+  d_to_axis = norm((p-x) - d_along_axis*nn)          !Proj'd dist along axis
+  inside    = merge(.true.,.false.,d_to_axis<r_at_p) !p is inside if d < r
+endif
+
+end subroutine insideCone
+
+!------------------------------------------------------------------------------
+
+subroutine insideCappedCone(p,n,theta,R,center,inside)
+
+!Check if a point `p` is inside a cone or a spherical cap adjacent to the
+!cone's base.
+!  n:     direction vector, pointing from `x` to the base
+!  theta: (full!) opening angle of cone in degrees (i.e. theta=180 is a hemisphere)
+!  R:     sphere radius
+!  c:     sphere center / cone apex
+
+use kinds
+use PhysicalConstants
+
+implicit none
+real(dp),intent(in):: p(3),n(3),theta,R,center(3)
+logical,intent(out):: inside
+real(dp)::            d_x2p,rcone_in,rcone_out,norm,h
+
+d_x2p = norm(p-center)                          !Dist from center of sphere to point
+if (d_x2p .gt. R) then
+  inside = .false.
+else
+  h         = R * cos(theta/180.*pi / 2.)       !Height of inscribed cone
+  rcone_in  = sqrt(R**2 - h**2)                 !Radius of inscribed cone
+  rcone_out = rcone_in * R/h                    !Radius of circumscribed cone
+  call insideCone(center,n,R,rcone_out,p,inside)
+endif
+
+end subroutine insideCappedCone
+
+!------------------------------------------------------------------------------
+
 subroutine Int2Char(i,a,LZ)
 
 implicit none
@@ -3035,6 +3165,37 @@ else
 endif
 
 end subroutine InverseNeufeld
+
+!------------------------------------------------------------------------------
+
+subroutine JetDir(n,theta,nhat_i)
+
+!Randomly selects a unit vector with isotropical distribution inside a cone of
+!direction +/- `n` and (full) opening angle `theta`.
+
+use kinds
+use iMonteCarlo
+
+implicit none
+real(dp),intent(in)::  n(3),theta
+real(dp),intent(out):: nhat_i(3)
+real(dp)::             R3(3),rsq
+logical::              inside
+
+do
+  call MonteCarlo(R3)                           !Make random x-, y- and z-
+  R3  = 2*R3 - 1                                !values between -1 and 1
+  rsq = sum(R3**2)
+  if (rsq .gt. 1.) cycle
+  call insideCappedCone(R3, n,theta,1d0,(/0d0,0d0,0d0/),inside)
+  if (inside) exit
+  call insideCappedCone(R3,-n,theta,1d0,(/0d0,0d0,0d0/),inside)
+  if (inside) exit
+enddo                                           !not to favor corners of box
+
+nhat_i = R3 / sqrt(rsq)                         !Normalize to unit vector
+
+end subroutine JetDir
 
 !------------------------------------------------------------------------------
 
@@ -3170,65 +3331,65 @@ end subroutine MakeFlorent
 
 subroutine MakeSemireal
 
-use kinds
-use PhysicalConstants
-use GlobalData
-use DataArrays
-use ObservationalParameters
-use iMonteCarlo
-use iDoppler
-use igasdev
-
-implicit none
-integer:: i,j,k,n,q,cl
-real(dp)::  R,R2(2),R3(3),rsq,P,X_cl(3),d_cl,X(3),nhat(3),dd
-real(dp)::  tt1,tt2
-
-allocate(Clouds(N_cl,3))
-allocate(CloudVelDisp(N_cl,3))
-
-Dnu_DString   = Doppler((/T_sh, T_cl, T_ICM, T_sh/)) !Doppler width in couds; Hz
-n_HIString(0) = 1e-37                           !Emptiness outside shell
-n_HIString(1) = max(n_HI_cl,1d-37)              !Cloud HI density
-n_HIString(2) = max(n_HI_ICM,1d-37)             !ICM HI density, in center
-n_HIString(3) = max(n_HI_sh,1d-37)              !Shell HI density
-# ifdef dust
-n_dString(0)  = 1e-37                           !Emptiness outside shell
-n_dString(1)  = max(n_HI_cl  * Z_cl  / Z0,1d-37)!Cloud "dust density"
-n_dString(2)  = max(n_HI_ICM * Z_ICM / Z0,1d-37)!ICM "dust density", in center
-n_dString(3)  = max(n_HI_sh  * Z_sh  / Z0,1d-37)!Shell "dust density"
-# endif
-
-if (N_cl .gt. 0) then
-  cl = 1
-  do                                            !Put cloud centers in "Clouds"
-    do                                          !density gradient
-      call MonteCarlo(R3)
-      R3  = 2*R3 - 1
-      rsq = sum(R3**2)
-      if (rsq .le. 1) exit
-    enddo
-    R3 = R3 / sqrt(rsq)                         !Normalized random unit vector
-
-    do                                          !
-      call MonteCarlo(R2)                       !Normalized gradient weighted
-      P = exp(-(R2(1)/(H1/R_box))**exp1)                !distance in [0,1] (truncated!)
-      if (R2(2) .le. P) exit                    !
-    enddo                                       !
-
-    X_cl = R_box + (R3 * R2(1)*r_gal)
-    d_cl = sqrt(sum((X_cl-R_box)**2))           !Distance from box center
-
-    if (d_cl .gt. r_gal) cycle                  !Make sure they are in galaxy
-  ! Uncomment folowing line  if you don't want the possibility of a central cloud:
-  ! if (d_cl .le. r_cl+D_box/ni*sqrt(3.)/2) cycle!...and don't overlap box center
-    Clouds(cl,:) = X_cl
-    call gasdev(R3)
-    CloudVelDisp(cl,:) = R3 * sigV_cl           !Cloud vel. disp. std. dev. in km/s
-    cl = cl + 1
-    if (cl .gt. N_cl) exit
-  enddo
-endif
+! use kinds
+! use PhysicalConstants
+! use GlobalData
+! use DataArrays
+! use ObservationalParameters
+! use iMonteCarlo
+! use iDoppler
+! use igasdev
+! 
+! implicit none
+! integer:: i,j,k,n,q,cl
+! real(dp)::  R,R2(2),R3(3),rsq,P,X_cl(3),d_cl,X(3),nhat(3),dd
+! real(dp)::  tt1,tt2
+! 
+! allocate(Clouds(N_cl,3))
+! allocate(CloudVelDisp(N_cl,3))
+! 
+! Dnu_DString   = Doppler((/T_sh, T_cl, T_ICM, T_sh/)) !Doppler width in couds; Hz
+! n_HIString(0) = 1e-37                           !Emptiness outside shell
+! n_HIString(1) = max(n_HI_cl,1d-37)              !Cloud HI density
+! n_HIString(2) = max(n_HI_ICM,1d-37)             !ICM HI density, in center
+! n_HIString(3) = max(n_HI_sh,1d-37)              !Shell HI density
+! # ifdef dust
+! n_dString(0)  = 1e-37                           !Emptiness outside shell
+! n_dString(1)  = max(n_HI_cl  * Z_cl  / Z0,1d-37)!Cloud "dust density"
+! n_dString(2)  = max(n_HI_ICM * Z_ICM / Z0,1d-37)!ICM "dust density", in center
+! n_dString(3)  = max(n_HI_sh  * Z_sh  / Z0,1d-37)!Shell "dust density"
+! # endif
+! 
+! if (N_cl .gt. 0) then
+!   cl = 1
+!   do                                            !Put cloud centers in "Clouds"
+!     do                                          !density gradient
+!       call MonteCarlo(R3)
+!       R3  = 2*R3 - 1
+!       rsq = sum(R3**2)
+!       if (rsq .le. 1) exit
+!     enddo
+!     R3 = R3 / sqrt(rsq)                         !Normalized random unit vector
+! 
+!     do                                          !
+!       call MonteCarlo(R2)                       !Normalized gradient weighted
+!       P = exp(-(R2(1)/(H1/R_box))**exp1)                !distance in [0,1] (truncated!)
+!       if (R2(2) .le. P) exit                    !
+!     enddo                                       !
+! 
+!     X_cl = R_box + (R3 * R2(1)*r_gal)
+!     d_cl = sqrt(sum((X_cl-R_box)**2))           !Distance from box center
+! 
+!     if (d_cl .gt. r_gal) cycle                  !Make sure they are in galaxy
+!   ! Uncomment folowing line  if you don't want the possibility of a central cloud:
+!   ! if (d_cl .le. r_cl+D_box/ni*sqrt(3.)/2) cycle!...and don't overlap box center
+!     Clouds(cl,:) = X_cl
+!     call gasdev(R3)
+!     CloudVelDisp(cl,:) = R3 * sigV_cl           !Cloud vel. disp. std. dev. in km/s
+!     cl = cl + 1
+!     if (cl .gt. N_cl) exit
+!   enddo
+! endif
 
 end subroutine MakeSemireal
 
@@ -3615,8 +3776,8 @@ if (.not. skip) then
 
   if (FreeEsc) then
     w_esc = (2)* .5d0             * exp(-tau_esc) * w_ph
-  else
-    w_esc = (2)* .375d0*(1+mu**2) * exp(-tau_esc) * w_ph
+  else                                                   ! > Tested: both give ~1
+    w_esc = (2)* .375d0*(1+mu**2) * exp(-tau_esc) * w_ph !/
   endif
 
   if (DirVec(1).eq. 1) then; specxp(s1) = specxp(s1) + w_esc ; CCDxp(m,n,s2) = CCDxp(m,n,s2) + w_esc ; elseif &
@@ -3917,16 +4078,19 @@ call getlun(l)
 open(l,file=trim(infile),form='unformatted',status='old',action='read')
 
 read(l) N_cells,D_box,ni,nj,nk,L_tot,BWtemp,n_ph,emdimL,emdimF,n_recL,n_recF!Remember: n_ph = n_ph(2)
-if (any((/emdimL,emdimF/) .ne. 3)) stop 'Not ready for photon weighting scheme. Sorry.'
+if (any((/emdimL,emdimF/) .ne. 3)) then
+  write(*,*) "Not ready for photon weighting (I'm so sorry). In the .in file,"
+  write(*,*) "please set b_Lya and b_FUV to >1e10 and rerun `initialEmission`."
+endif
 if (n_phtot .ne. sum(n_ph)) then
   write(*,*) "Error: Keyword 'n_phtot' has been changed in '", trim(parfile), "' since"
-  write(*,*) "it was used with 'InitialEmission', from", sum(n_ph), 'to', n_phtot, '.'
+  write(*,*) "it was used with `initialEmission`, from", sum(n_ph), 'to', n_phtot, '.'
   write(*,*) "Don't do that, okay? You're messing things up."
   stop
 endif
 if (any(abs(BWtemp-BW) .gt. 1e-6)) then
   write(*,*) "Error: Keyword 'BW' has been changed in '", trim(parfile), "' since"
-  write(*,*) "it was used with 'InitialEmission', from ", real(BWtemp), 'to'
+  write(*,*) "it was used with `initialEmission`, from ", real(BWtemp), 'to'
   write(*,*) real(BW)
   write(*,*) "Don't do that, okay? You're messing things up."
   stop
@@ -4202,142 +4366,142 @@ read(l,*) model
       read(l,*) Omega_M      !Matter density parameter
       read(l,*) Omega_L      !Dark energy density parameter
 
-    case ('slab')
-    ! I/O
-      read(l,*) dummy
-      read(l,*) DataDir      !Mother directory
-      read(l,*) Subdir       !Subdirectory
-      read(l,*) wrtph        !Write to std. output for every wrtph phot
-      read(l,*) wrtfl        !Write file for every wrtfl photon
-      read(l,*) outlabel     !Label for main output files
-      read(l,*) specin       !-"- for input spectrum in Doppler widths
-      read(l,*) specout      !-"- for output spectrum in Doppler widths
+!   case ('slab')
+!   ! I/O
+!     read(l,*) dummy
+!     read(l,*) DataDir      !Mother directory
+!     read(l,*) Subdir       !Subdirectory
+!     read(l,*) wrtph        !Write to std. output for every wrtph phot
+!     read(l,*) wrtfl        !Write file for every wrtfl photon
+!     read(l,*) outlabel     !Label for main output files
+!     read(l,*) specin       !-"- for input spectrum in Doppler widths
+!     read(l,*) specout      !-"- for output spectrum in Doppler widths
 
-    ! Observations
-      read(l,*) dummy
-      read(l,*) BW           !Wavelength interval bounds in Angstrom
-      read(l,*) pix          !# of pixels/side in CCD
-      read(l,*) SpecRes1D    !Resolution of 1D spectrum; bins
-      read(l,*) SpecRes2D    !Resolution of 2D spectrum; bins
-      read(l,*) WhichCCDs    !(xp,xm,yp,ym,zp,zm)
+!   ! Observations
+!     read(l,*) dummy
+!     read(l,*) BW           !Wavelength interval bounds in Angstrom
+!     read(l,*) pix          !# of pixels/side in CCD
+!     read(l,*) SpecRes1D    !Resolution of 1D spectrum; bins
+!     read(l,*) SpecRes2D    !Resolution of 2D spectrum; bins
+!     read(l,*) WhichCCDs    !(xp,xm,yp,ym,zp,zm)
 
-    ! Simulation
-      read(l,*) dummy
-      read(l,*) ni           !Base grid resolution, x direction
-      read(l,*) nj           !                      y direction
-      read(l,*) nk           !                      z direction
-      read(l,*) n_slab       !Total slab thickness in # of cells
-      read(l,*) D_box        !Box size in kpc
-      read(l,*) D_obs        !Side length of area covered by CCD (centered on box center)
-      read(l,*) n_phtot      !Total # of emitted photon packets; Lya + cont.
-      read(l,*) SFR          !Star formation rate in Msun/yr (sets normalization)
-      read(l,*) EW_int       !Intrinsic EW in Angstrom
-      read(l,*) x_critType   !'intrinsic', 'global', or user-given value (as string) with prefix 'm' for maximum
-      read(l,*) x_injType    !Initial frequency: 'proper', '...
-      read(l,*) X_init       !Initial position: 'central', 'homo', 'lumdep', or '(x y z)'
-      read(l,*) n_init       !Initial direction: 'iso' or '(nx ny nz)'
-      read(l,*) TrueRan      !Use "true" random numbers, given by current date and time
-      read(l,*) N_los        !# of sightlines for calculating average quantities
+!   ! Simulation
+!     read(l,*) dummy
+!     read(l,*) ni           !Base grid resolution, x direction
+!     read(l,*) nj           !                      y direction
+!     read(l,*) nk           !                      z direction
+!     read(l,*) n_slab       !Total slab thickness in # of cells
+!     read(l,*) D_box        !Box size in kpc
+!     read(l,*) D_obs        !Side length of area covered by CCD (centered on box center)
+!     read(l,*) n_phtot      !Total # of emitted photon packets; Lya + cont.
+!     read(l,*) SFR          !Star formation rate in Msun/yr (sets normalization)
+!     read(l,*) EW_int       !Intrinsic EW in Angstrom
+!     read(l,*) x_critType   !'intrinsic', 'global', or user-given value (as string) with prefix 'm' for maximum
+!     read(l,*) x_injType    !Initial frequency: 'proper', '...
+!     read(l,*) X_init       !Initial position: 'central', 'homo', 'lumdep', or '(x y z)'
+!     read(l,*) n_init       !Initial direction: 'iso' or '(nx ny nz)'
+!     read(l,*) TrueRan      !Use "true" random numbers, given by current date and time
+!     read(l,*) N_los        !# of sightlines for calculating average quantities
 
-    ! Gas                 !Give only compatible values. To let system decide, give a value -1.
-      read(l,*) dummy
-      read(l,*) at           !a * tau_0 from center to face of slab
-      read(l,*) T_cl         !Gas temperature
-      read(l,*) n_HI_cl      !Neutral hydrogen density
-      read(l,*) NN_HI        !Neutral hydrogen column density from center to face of slab
-      read(l,*) V_z          !Slab velocity in z direction in km/s
-      read(l,*) recoil       !Include recoil
+!   ! Gas                 !Give only compatible values. To let system decide, give a value -1.
+!     read(l,*) dummy
+!     read(l,*) at           !a * tau_0 from center to face of slab
+!     read(l,*) T_cl         !Gas temperature
+!     read(l,*) n_HI_cl      !Neutral hydrogen density
+!     read(l,*) NN_HI        !Neutral hydrogen column density from center to face of slab
+!     read(l,*) V_z          !Slab velocity in z direction in km/s
+!     read(l,*) recoil       !Include recoil
 
-    ! Dust
-      read(l,*) dummy
-      read(l,*) tau_a        !Dust absorption optical depth from center to face of slab
-      read(l,*) Z_cl         !Metallicity in terms of Solar
-      read(l,*) EBV          !Color excess from center to face of slab
-      read(l,*) DustType     !'SMC', 'LMC', or user-given cross section
-      read(l,*) albedo       !Dust albedo
-      read(l,*) g            !Dust scattering asymmetry parameter
+!   ! Dust
+!     read(l,*) dummy
+!     read(l,*) tau_a        !Dust absorption optical depth from center to face of slab
+!     read(l,*) Z_cl         !Metallicity in terms of Solar
+!     read(l,*) EBV          !Color excess from center to face of slab
+!     read(l,*) DustType     !'SMC', 'LMC', or user-given cross section
+!     read(l,*) albedo       !Dust albedo
+!     read(l,*) g            !Dust scattering asymmetry parameter
 
-    ! Cosmology
-      read(l,*) dummy
-      read(l,*) z            !Redshift of snapshot
-      read(l,*) H_0          !Hubble constant, km/s/Mpc
-      read(l,*) Omega_M      !Matter density parameter
-      read(l,*) Omega_L      !Dark energy density parameter
+!   ! Cosmology
+!     read(l,*) dummy
+!     read(l,*) z            !Redshift of snapshot
+!     read(l,*) H_0          !Hubble constant, km/s/Mpc
+!     read(l,*) Omega_M      !Matter density parameter
+!     read(l,*) Omega_L      !Dark energy density parameter
 
-      n_phases = 1
+!     n_phases = 1
 
-      z_0 = .5d0 * n_slab/real(nk) * D_box*kpc
+!     z_0 = .5d0 * n_slab/real(nk) * D_box*kpc
 
-    case ('shell')
-    ! I/O
-      read(l,*) dummy
-      read(l,*) DataDir      !Mother directory
-      read(l,*) Subdir       !Subdirectory
-      read(l,*) wrtph        !Write to std. output for every wrtph phot
-      read(l,*) wrtfl        !Write file for every wrtfl photon
-      read(l,*) outlabel     !Label for main output files
-      read(l,*) specin          !-"- for input spectrum in Doppler widths
-      read(l,*) specout         !-"- for output spectrum in Doppler widths
+!   case ('shell')
+!   ! I/O
+!     read(l,*) dummy
+!     read(l,*) DataDir      !Mother directory
+!     read(l,*) Subdir       !Subdirectory
+!     read(l,*) wrtph        !Write to std. output for every wrtph phot
+!     read(l,*) wrtfl        !Write file for every wrtfl photon
+!     read(l,*) outlabel     !Label for main output files
+!     read(l,*) specin          !-"- for input spectrum in Doppler widths
+!     read(l,*) specout         !-"- for output spectrum in Doppler widths
 
-    ! Observations
-      read(l,*) dummy
-      read(l,*) BW           !Wavelength interval bounds in Angstrom
-      read(l,*) pix          !# of pixels/side in CCD
-      read(l,*) SpecRes1D    !Resolution of 1D spectrum; bins
-      read(l,*) SpecRes2D    !Resolution of 2D spectrum; bins
-      read(l,*) WhichCCDs    !(xp,xm,yp,ym,zp,zm)
+!   ! Observations
+!     read(l,*) dummy
+!     read(l,*) BW           !Wavelength interval bounds in Angstrom
+!     read(l,*) pix          !# of pixels/side in CCD
+!     read(l,*) SpecRes1D    !Resolution of 1D spectrum; bins
+!     read(l,*) SpecRes2D    !Resolution of 2D spectrum; bins
+!     read(l,*) WhichCCDs    !(xp,xm,yp,ym,zp,zm)
 
-    ! Simulation
-      read(l,*) dummy
-      read(l,*) ni           !Base grid resolution, x direction
-      read(l,*) nj           !                      y direction
-      read(l,*) nk           !                      z direction
-      read(l,*) D_box        !Box size in kpc
-      read(l,*) D_obs        !Side length of area covered by CCD (centered on box center)
-      read(l,*) r_inner      !Radius of inner shell surface in kpc
-      read(l,*) r_outer      !Radius of outer shell surface in kpc
-      read(l,*) n_phtot      !Total # of emitted photon packets; Lya + cont.
-      read(l,*) SFR          !Star formation rate in Msun/yr (sets normalization)
-      read(l,*) EW_int       !Intrinsic EW in Angstrom
-      read(l,*) x_critType   !'intrinsic', 'global', or user-given value (as string) with prefix 'm' for maximum
-      read(l,*) x_injType    !Initial frequency: 'proper', '...
-      read(l,*) X_init       !Initial position: 'central', 'homo', 'lumdep', or '(x y z)'
-      read(l,*) n_init       !Initial direction: 'iso' or '(nx ny nz)'
-      read(l,*) TrueRan      !Use "true" random numbers, given by current date and time
-      read(l,*) N_los        !# of sightlines for calculating average quantities
+!   ! Simulation
+!     read(l,*) dummy
+!     read(l,*) ni           !Base grid resolution, x direction
+!     read(l,*) nj           !                      y direction
+!     read(l,*) nk           !                      z direction
+!     read(l,*) D_box        !Box size in kpc
+!     read(l,*) D_obs        !Side length of area covered by CCD (centered on box center)
+!     read(l,*) r_inner      !Radius of inner shell surface in kpc
+!     read(l,*) r_outer      !Radius of outer shell surface in kpc
+!     read(l,*) n_phtot      !Total # of emitted photon packets; Lya + cont.
+!     read(l,*) SFR          !Star formation rate in Msun/yr (sets normalization)
+!     read(l,*) EW_int       !Intrinsic EW in Angstrom
+!     read(l,*) x_critType   !'intrinsic', 'global', or user-given value (as string) with prefix 'm' for maximum
+!     read(l,*) x_injType    !Initial frequency: 'proper', '...
+!     read(l,*) X_init       !Initial position: 'central', 'homo', 'lumdep', or '(x y z)'
+!     read(l,*) n_init       !Initial direction: 'iso' or '(nx ny nz)'
+!     read(l,*) TrueRan      !Use "true" random numbers, given by current date and time
+!     read(l,*) N_los        !# of sightlines for calculating average quantities
 
-    ! Gas                     !Give only compatible values. To let system decide, give a value -1.
-      read(l,*) dummy
-      read(l,*) at           !a * tau_0 from center to outer face of shell
-      read(l,*) T_cl         !Gas temperature
-      read(l,*) n_HI_cl      !Neutral hydrogen density
-      read(l,*) sigV_cl      !
-      read(l,*) NN_HI        !Neutral hydrogen column density from center to outer face of shell
-      read(l,*) V_out        !Outflow velocity in km/s (<0 for collapse)
-      read(l,*) Vprof        !Velocity profile
-      read(l,*) recoil       !Include atom recoil
+!   ! Gas                     !Give only compatible values. To let system decide, give a value -1.
+!     read(l,*) dummy
+!     read(l,*) at           !a * tau_0 from center to outer face of shell
+!     read(l,*) T_cl         !Gas temperature
+!     read(l,*) n_HI_cl      !Neutral hydrogen density
+!     read(l,*) sigV_cl      !
+!     read(l,*) NN_HI        !Neutral hydrogen column density from center to outer face of shell
+!     read(l,*) V_out        !Outflow velocity in km/s (<0 for collapse)
+!     read(l,*) Vprof        !Velocity profile
+!     read(l,*) recoil       !Include atom recoil
 
-    ! Dust
-      read(l,*) dummy
-      read(l,*) tau_a        !Cloud metallicity in terms of Solar
-      read(l,*) Z_cl         !Metallicity in terms of Solar
-      read(l,*) EBV          !Color excess
-      read(l,*) DustType     !'SMC', 'LMC' or user-given cross section
-      read(l,*) albedo       !Dust albedo
-      read(l,*) g            !Dust scattering asymmetry parameter
+!   ! Dust
+!     read(l,*) dummy
+!     read(l,*) tau_a        !Cloud metallicity in terms of Solar
+!     read(l,*) Z_cl         !Metallicity in terms of Solar
+!     read(l,*) EBV          !Color excess
+!     read(l,*) DustType     !'SMC', 'LMC' or user-given cross section
+!     read(l,*) albedo       !Dust albedo
+!     read(l,*) g            !Dust scattering asymmetry parameter
 
-    ! Cosmology
-      read(l,*) dummy
-      read(l,*) z            !Redshift of snapshot
-      read(l,*) H_0          !Hubble constant, km/s/Mpc
-      read(l,*) Omega_M      !Matter density parameter
-      read(l,*) Omega_L      !Dark energy density parameter
+!   ! Cosmology
+!     read(l,*) dummy
+!     read(l,*) z            !Redshift of snapshot
+!     read(l,*) H_0          !Hubble constant, km/s/Mpc
+!     read(l,*) Omega_M      !Matter density parameter
+!     read(l,*) Omega_L      !Dark energy density parameter
 
-      n_phases = 1
+!     n_phases = 1
 
-      r_inner = r_inner * kpc
-      r_outer = r_outer * kpc
-      z_0     = r_outer - r_inner
+!     r_inner = r_inner * kpc
+!     r_outer = r_outer * kpc
+!     z_0     = r_outer - r_inner
 
     case ('multiphase')
     ! I/O
@@ -4412,7 +4576,7 @@ read(l,*) model
       read(l,*) Z_sh       !Shell metallicity in terms of Solar
       read(l,*) T_sh       !Shell gas temperature
       read(l,*) V_out      !Outflow velocity in km/s (>0 for collapse)
-      read(l,*) Vprof        !Velocity profile
+      read(l,*) Vprof      !Velocity profile
       read(l,*) OA         !(Full) opening angle in degrees
       read(l,*) n_jet      !Direction of one of the jets (the other is opposite)
 
@@ -4443,188 +4607,188 @@ read(l,*) model
       n_phases = 2
 
 
-    case ('semireal')
-    ! I/O
-      read(l,*) dummy
-      read(l,*) DataDir      !Mother directory
-      read(l,*) Subdir       !Subdirectory
-      read(l,*) wrtph        !Write to std. output for every wrtph phot
-      read(l,*) wrtfl        !Write file for every wrtfl photon
-      read(l,*) outlabel     !Label for main output files
-      read(l,*) specin       !Write input spectrum character
-      read(l,*) specout      !-"- for output spectrum in Doppler widths
-      read(l,*) Cloudfile    !File for writing cloud cells; empty string to not write
-      read(l,*) Windfile     !File for writing wind cells; empty string to not write
+!   case ('semireal')
+!   ! I/O
+!     read(l,*) dummy
+!     read(l,*) DataDir      !Mother directory
+!     read(l,*) Subdir       !Subdirectory
+!     read(l,*) wrtph        !Write to std. output for every wrtph phot
+!     read(l,*) wrtfl        !Write file for every wrtfl photon
+!     read(l,*) outlabel     !Label for main output files
+!     read(l,*) specin       !Write input spectrum character
+!     read(l,*) specout      !-"- for output spectrum in Doppler widths
+!     read(l,*) Cloudfile    !File for writing cloud cells; empty string to not write
+!     read(l,*) Windfile     !File for writing wind cells; empty string to not write
 
-    ! Observations
-      read(l,*) dummy
-      read(l,*) BW            !Wavelength interval bounds in Angstrom
-      read(l,*) pix           !# of pixels/side in CCD
-      read(l,*) SpecRes1D     !Resolution of 1D spectrum; bins
-      read(l,*) SpecRes2D     !Resolution of 2D spectrum; bins
-      read(l,*) WhichCCDs     !(xp,xm,yp,ym,zp,zm)
+!   ! Observations
+!     read(l,*) dummy
+!     read(l,*) BW            !Wavelength interval bounds in Angstrom
+!     read(l,*) pix           !# of pixels/side in CCD
+!     read(l,*) SpecRes1D     !Resolution of 1D spectrum; bins
+!     read(l,*) SpecRes2D     !Resolution of 2D spectrum; bins
+!     read(l,*) WhichCCDs     !(xp,xm,yp,ym,zp,zm)
 
-    ! Simulation
-      read(l,*) dummy
-      read(l,*) ni           !Base grid resolution, x direction
-      read(l,*) nj           !                      y direction
-      read(l,*) nk           !                      z direction
-      read(l,*) D_box        !Box size in kpc
-      read(l,*) D_obs        !Side length of area covered by CCD (centered on box center)
-      read(l,*) n_phtot      !Total # of emitted photon packets; Lya + cont.
-      read(l,*) SFR          !Star formation rate in Msun/yr (sets normalization)
-      read(l,*) EW_int       !Intrinsic EW in Angstrom
-      read(l,*) x_critType   !'intrinsic', 'global', or user-given value (as string) with prefix 'm' for maximum
-      read(l,*) x_injType    !Initial frequency: 'proper', '...
-      read(l,*) X_init       !Initial position: 'central', 'homo', 'lumdep', or '(x y z)'
-      read(l,*) n_init       !Initial direction: 'iso' or '(nx ny nz)'
-      read(l,*) TrueRan      !Use "true" random numbers, given by current date and time
-      read(l,*) N_los        !# of sightlines for calculating average quantities
+!   ! Simulation
+!     read(l,*) dummy
+!     read(l,*) ni           !Base grid resolution, x direction
+!     read(l,*) nj           !                      y direction
+!     read(l,*) nk           !                      z direction
+!     read(l,*) D_box        !Box size in kpc
+!     read(l,*) D_obs        !Side length of area covered by CCD (centered on box center)
+!     read(l,*) n_phtot      !Total # of emitted photon packets; Lya + cont.
+!     read(l,*) SFR          !Star formation rate in Msun/yr (sets normalization)
+!     read(l,*) EW_int       !Intrinsic EW in Angstrom
+!     read(l,*) x_critType   !'intrinsic', 'global', or user-given value (as string) with prefix 'm' for maximum
+!     read(l,*) x_injType    !Initial frequency: 'proper', '...
+!     read(l,*) X_init       !Initial position: 'central', 'homo', 'lumdep', or '(x y z)'
+!     read(l,*) n_init       !Initial direction: 'iso' or '(nx ny nz)'
+!     read(l,*) TrueRan      !Use "true" random numbers, given by current date and time
+!     read(l,*) N_los        !# of sightlines for calculating average quantities
 
-    ! Galaxy
-      read(l,*) dummy
-      read(l,*) r_gal
-      read(l,*) H1
-      read(l,*) exp1
-      read(l,*) H2
-      read(l,*) exp2
-      read(l,*) N_cl       !# of clouds
-      read(l,*) rf         !Cloud radius in terms of box radius
-      read(l,*) followGrad
-      read(l,*) T_cl       !Cloud gas temperature
-      read(l,*) n_HI_cl    !Cloud neutral hydrogen density
-      read(l,*) Z_cl       !Cloud metallicity in terms of Solar
-      read(l,*) sigV_cl    !
-      read(l,*) T_ICM      !ICM gas temperature
-      read(l,*) n_HI_ICM   !ICM neutral hydrogen density
-      read(l,*) Z_ICM      !ICM metallicity in terms of Solar
-      read(l,*) V_in       !Infall velocity for clouds and ICM
+!   ! Galaxy
+!     read(l,*) dummy
+!     read(l,*) r_gal
+!     read(l,*) H1
+!     read(l,*) exp1
+!     read(l,*) H2
+!     read(l,*) exp2
+!     read(l,*) N_cl       !# of clouds
+!     read(l,*) rf         !Cloud radius in terms of box radius
+!     read(l,*) followGrad
+!     read(l,*) T_cl       !Cloud gas temperature
+!     read(l,*) n_HI_cl    !Cloud neutral hydrogen density
+!     read(l,*) Z_cl       !Cloud metallicity in terms of Solar
+!     read(l,*) sigV_cl    !
+!     read(l,*) T_ICM      !ICM gas temperature
+!     read(l,*) n_HI_ICM   !ICM neutral hydrogen density
+!     read(l,*) Z_ICM      !ICM metallicity in terms of Solar
+!     read(l,*) V_in       !Infall velocity for clouds and ICM
 
-    ! Wind
-      read(l,*) dummy
-      read(l,*) r_inner    !Radius of inner shell surface in kpc
-      read(l,*) r_outer    !Radius of outer shell surface in kpc
-      read(l,*) NN_HI_sh   !HI Column density of shell
-      read(l,*) Z_sh       !Shell metallicity in terms of Solar
-      read(l,*) T_sh       !Shell gas temperature
-      read(l,*) V_out      !Outflow velocity in km/s (>0 for collapse)
-      read(l,*) Vprof        !Velocity profile
-      read(l,*) OA         !(Full) opening angle in degrees
-      read(l,*) n_jet      !Direction of one of the jets (not necessarily unit vector)
+!   ! Wind
+!     read(l,*) dummy
+!     read(l,*) r_inner    !Radius of inner shell surface in kpc
+!     read(l,*) r_outer    !Radius of outer shell surface in kpc
+!     read(l,*) NN_HI_sh   !HI Column density of shell
+!     read(l,*) Z_sh       !Shell metallicity in terms of Solar
+!     read(l,*) T_sh       !Shell gas temperature
+!     read(l,*) V_out      !Outflow velocity in km/s (>0 for collapse)
+!     read(l,*) Vprof        !Velocity profile
+!     read(l,*) OA         !(Full) opening angle in degrees
+!     read(l,*) n_jet      !Direction of one of the jets (not necessarily unit vector)
 
-    ! Gas and dust
-      read(l,*) dummy
-      read(l,*) recoil     !Include atom recoil
-      read(l,*) DustType   !'SMC', 'LMC' or user-given cross section
-      read(l,*) albedo     !Dust albedo
-      read(l,*) g          !Dust scattering asymmetry parameter
+!   ! Gas and dust
+!     read(l,*) dummy
+!     read(l,*) recoil     !Include atom recoil
+!     read(l,*) DustType   !'SMC', 'LMC' or user-given cross section
+!     read(l,*) albedo     !Dust albedo
+!     read(l,*) g          !Dust scattering asymmetry parameter
 
-    ! Background QSO
-      read(l,*) dummy
-      read(l,*) X_QSOc     !QSO position in kpc (box center is [0,0,0]) => calulate N_HI from X_QSO through box
+!   ! Background QSO
+!     read(l,*) dummy
+!     read(l,*) X_QSOc     !QSO position in kpc (box center is [0,0,0]) => calulate N_HI from X_QSO through box
 
-    ! Cosmology
-      read(l,*) dummy
-      read(l,*) z          !Redshift of snapshot
-      read(l,*) H_0        !Hubble constant, km/s/Mpc
-      read(l,*) Omega_M    !Matter density parameter
-      read(l,*) Omega_L    !Dark energy density parameter
+!   ! Cosmology
+!     read(l,*) dummy
+!     read(l,*) z          !Redshift of snapshot
+!     read(l,*) H_0        !Hubble constant, km/s/Mpc
+!     read(l,*) Omega_M    !Matter density parameter
+!     read(l,*) Omega_L    !Dark energy density parameter
 
-      n_phases = 3
+!     n_phases = 3
 
-      if (r_inner .lt. 0) then
-        r_inner = (-r_inner -1) * D_box/ni
-        r_outer = (-r_outer)    * D_box/ni
-      endif
-      H1        = H1    * kpc
-      H2        = H2    * kpc
-      r_gal     = r_gal * kpc                   !Galaxy "radius" of ICM and clouds
-      r_cl      = rf * D_box/2 * kpc            !Cloud radius in kpc
-      r_inner   = r_inner * kpc
-      r_outer   = r_outer * kpc
-      z_0       = r_outer - r_inner             !Shell thickness in kpc
-      n_jet     = n_jet / norm(n_jet)           !Make unit vector
-      cosOAb2sq = cos(OA/2 / 180 * pi)**2       !cos^2(OA/2) in rad
-      n_HI_sh   = NN_HI_sh / z_0                !HI density in shell
-      write(*,*) 'n_HI in shell:', real(n_HI_sh)
+!     if (r_inner .lt. 0) then
+!       r_inner = (-r_inner -1) * D_box/ni
+!       r_outer = (-r_outer)    * D_box/ni
+!     endif
+!     H1        = H1    * kpc
+!     H2        = H2    * kpc
+!     r_gal     = r_gal * kpc                   !Galaxy "radius" of ICM and clouds
+!     r_cl      = rf * D_box/2 * kpc            !Cloud radius in kpc
+!     r_inner   = r_inner * kpc
+!     r_outer   = r_outer * kpc
+!     z_0       = r_outer - r_inner             !Shell thickness in kpc
+!     n_jet     = n_jet / norm(n_jet)           !Make unit vector
+!     cosOAb2sq = cos(OA/2 / 180 * pi)**2       !cos^2(OA/2) in rad
+!     n_HI_sh   = NN_HI_sh / z_0                !HI density in shell
+!     write(*,*) 'n_HI in shell:', real(n_HI_sh)
 
-    case ('florent')
-    ! I/O
-      read(l,*) dummy
-      read(l,*) DataDir      !Mother directory
-      read(l,*) Subdir       !Subdirectory
-      read(l,*) wrtph        !Write to std. output for every wrtph phot
-      read(l,*) wrtfl        !Write file for every wrtfl photon
-      read(l,*) outlabel     !Label for main output files
-      read(l,*) specin          !-"- for input spectrum in Doppler widths
-      read(l,*) specout         !-"- for output spectrum in Doppler widths
+!   case ('florent')
+!   ! I/O
+!     read(l,*) dummy
+!     read(l,*) DataDir      !Mother directory
+!     read(l,*) Subdir       !Subdirectory
+!     read(l,*) wrtph        !Write to std. output for every wrtph phot
+!     read(l,*) wrtfl        !Write file for every wrtfl photon
+!     read(l,*) outlabel     !Label for main output files
+!     read(l,*) specin          !-"- for input spectrum in Doppler widths
+!     read(l,*) specout         !-"- for output spectrum in Doppler widths
 
-    ! Observations
-      read(l,*) dummy
-      read(l,*) BW           !Wavelength interval bounds in Angstrom
-      read(l,*) pix          !# of pixels/side in CCD
-      read(l,*) SpecRes1D    !Resolution of 1D spectrum; bins
-      read(l,*) SpecRes2D    !Resolution of 2D spectrum; bins
-      read(l,*) WhichCCDs    !(xp,xm,yp,ym,zp,zm)
+!   ! Observations
+!     read(l,*) dummy
+!     read(l,*) BW           !Wavelength interval bounds in Angstrom
+!     read(l,*) pix          !# of pixels/side in CCD
+!     read(l,*) SpecRes1D    !Resolution of 1D spectrum; bins
+!     read(l,*) SpecRes2D    !Resolution of 2D spectrum; bins
+!     read(l,*) WhichCCDs    !(xp,xm,yp,ym,zp,zm)
 
-    ! Simulation
-      read(l,*) dummy
-      read(l,*) ni           !Base grid resolution, x direction
-      read(l,*) nj           !                      y direction
-      read(l,*) nk           !                      z direction
-      read(l,*) D_box        !Box size in kpc
-      read(l,*) D_obs        !Side length of area covered by CCD (centered on box center)
-      read(l,*) r_inner      !Radius of inner shell surface in kpc
-      read(l,*) r_outer      !Radius of outer shell surface in kpc
-      read(l,*) n_phtot      !Total # of emitted photon packets; Lya + cont.
-      read(l,*) SFR          !Star formation rate in Msun/yr (sets normalization)
-      read(l,*) EW_int       !Intrinsic EW in Angstrom
-      read(l,*) x_critType   !'intrinsic', 'global', or user-given value (as string) with prefix 'm' for maximum
-      read(l,*) x_injType    !Initial frequency: 'proper', '...
-      read(l,*) X_init       !Initial position: 'central', 'homo', 'lumdep', or '(x y z)'
-      read(l,*) n_init       !Initial direction: 'iso' or '(nx ny nz)'
-      read(l,*) TrueRan      !Use "true" random numbers, given by current date and time
-      read(l,*) N_los        !# of sightlines for calculating average quantities
+!   ! Simulation
+!     read(l,*) dummy
+!     read(l,*) ni           !Base grid resolution, x direction
+!     read(l,*) nj           !                      y direction
+!     read(l,*) nk           !                      z direction
+!     read(l,*) D_box        !Box size in kpc
+!     read(l,*) D_obs        !Side length of area covered by CCD (centered on box center)
+!     read(l,*) r_inner      !Radius of inner shell surface in kpc
+!     read(l,*) r_outer      !Radius of outer shell surface in kpc
+!     read(l,*) n_phtot      !Total # of emitted photon packets; Lya + cont.
+!     read(l,*) SFR          !Star formation rate in Msun/yr (sets normalization)
+!     read(l,*) EW_int       !Intrinsic EW in Angstrom
+!     read(l,*) x_critType   !'intrinsic', 'global', or user-given value (as string) with prefix 'm' for maximum
+!     read(l,*) x_injType    !Initial frequency: 'proper', '...
+!     read(l,*) X_init       !Initial position: 'central', 'homo', 'lumdep', or '(x y z)'
+!     read(l,*) n_init       !Initial direction: 'iso' or '(nx ny nz)'
+!     read(l,*) TrueRan      !Use "true" random numbers, given by current date and time
+!     read(l,*) N_los        !# of sightlines for calculating average quantities
 
-    ! Gas                 !Give only compatible values. To let system decide, give a value -1.
-      read(l,*) dummy
-      read(l,*) FF           !Cloud filling factor
-      read(l,*) T_cl         !Cloud gas temperature
-      read(l,*) n_HI_cl      !Cloud neutral hydrogen density
-      read(l,*) sigV_cl      !
-      read(l,*) T_ICM        !ICM gas temperature
-      read(l,*) n_HI_ICM     !ICM neutral hydrogen density
-      read(l,*) V_out        !Outflow velocity in km/s (<0 for collapse)
-      read(l,*) Vprof        !Velocity profile
-      read(l,*) recoil       !Include atom recoil
+!   ! Gas                 !Give only compatible values. To let system decide, give a value -1.
+!     read(l,*) dummy
+!     read(l,*) FF           !Cloud filling factor
+!     read(l,*) T_cl         !Cloud gas temperature
+!     read(l,*) n_HI_cl      !Cloud neutral hydrogen density
+!     read(l,*) sigV_cl      !
+!     read(l,*) T_ICM        !ICM gas temperature
+!     read(l,*) n_HI_ICM     !ICM neutral hydrogen density
+!     read(l,*) V_out        !Outflow velocity in km/s (<0 for collapse)
+!     read(l,*) Vprof        !Velocity profile
+!     read(l,*) recoil       !Include atom recoil
 
-    ! Dust
-      read(l,*) dummy
-      read(l,*) tau_a        !Dust absorption optical depth from center to face
-      read(l,*) EBV          !Color excess form center to face
-      read(l,*) Z_cl         !Cloud metallicity in terms of Solar
-      read(l,*) Z_ICM        !ICM metallicity in terms of Solar
-      read(l,*) DustType     !'SMC', 'LMC' or user-given cross section
-      read(l,*) albedo       !Dust albedo
-      read(l,*) g            !Dust scattering asymmetry parameter
+!   ! Dust
+!     read(l,*) dummy
+!     read(l,*) tau_a        !Dust absorption optical depth from center to face
+!     read(l,*) EBV          !Color excess form center to face
+!     read(l,*) Z_cl         !Cloud metallicity in terms of Solar
+!     read(l,*) Z_ICM        !ICM metallicity in terms of Solar
+!     read(l,*) DustType     !'SMC', 'LMC' or user-given cross section
+!     read(l,*) albedo       !Dust albedo
+!     read(l,*) g            !Dust scattering asymmetry parameter
 
-    ! Cosmology
-      read(l,*) dummy
-      read(l,*) z            !Redshift of snapshot
-      read(l,*) H_0          !Hubble constant, km/s/Mpc
-      read(l,*) Omega_M      !Matter density parameter
-      read(l,*) Omega_L      !Dark energy density parameter
+!   ! Cosmology
+!     read(l,*) dummy
+!     read(l,*) z            !Redshift of snapshot
+!     read(l,*) H_0          !Hubble constant, km/s/Mpc
+!     read(l,*) Omega_M      !Matter density parameter
+!     read(l,*) Omega_L      !Dark energy density parameter
 
-      n_phases = 2
+!     n_phases = 2
 
-      if (r_inner .lt. 0) then
-        r_inner = (-r_inner -1) * D_box/ni
-        r_outer = (-r_outer)    * D_box/ni
-      endif
-      r_inner = r_inner * kpc
-      r_outer = r_outer * kpc
-      z_0     = r_outer - r_inner
-      NN_HI   = (FF*n_HI_cl + (1-FF)*n_HI_ICM) * z_0
+!     if (r_inner .lt. 0) then
+!       r_inner = (-r_inner -1) * D_box/ni
+!       r_outer = (-r_outer)    * D_box/ni
+!     endif
+!     r_inner = r_inner * kpc
+!     r_outer = r_outer * kpc
+!     z_0     = r_outer - r_inner
+!     NN_HI   = (FF*n_HI_cl + (1-FF)*n_HI_ICM) * z_0
 
     case default
       stop 'Argh unknown model in ReadInput!'
@@ -4680,7 +4844,9 @@ if (trim(model).eq.'slab' .or. trim(model).eq.'shell') then
   endif
 
   ! Make sure BW is in Angstrom
-  if (BW(1).lt.0 .or. BW(1).gt.lambda_0) then     !BW is probably given in x-units
+  if (BW(1).lt.0 .or. BW(1).gt.lambda_0) then   !BW is probably given in x units
+    write(*,*) "Is BW really in Angstrom?"      !But what if it isn't???
+    write(*,*) "Assuming it's in x units, converting, and continuing..."
     temp  = BW(1)
     BW(1) = BW(2)
     BW(2) = temp
@@ -4779,7 +4945,11 @@ else
 endif
 
 ! Determine initial frequency distribution
-if (trim(x_injType) .eq. 'proper') then
+if (index(x_injType,'.dat') .ne. 0) then
+  call read_spec
+  call cum_spec
+  x_injType = 'user'
+elseif (trim(x_injType) .eq. 'proper') then
   write(*,*) 'Using Voigt function appropriate for cell.'
 elseif (index(x_injType,'fwhm') .eq. 1) then
   read(x_injType(5:),*) sigma_V
@@ -5094,12 +5264,75 @@ write(*,*) 'f_esc,iso: ', real(f_esc)
 write(*,*) 'Secs/ph.:  ', real((t2 - t1) / n_sofar)
 write(*,*) 'n_ph,eff:  ', real(n_sofar)
 
-if (len_trim(specin) .gt.0) flush(inlun)
+! if (len_trim(specin) .gt.0) flush(inlun)
 if (len_trim(specout).gt.0) flush(outlun)
 
 end subroutine ReadOutCCD
 
 !-------------------------------------------------------------------------------
+
+subroutine read_spec
+
+use kinds
+use PhysicalConstants
+use GlobalData
+
+implicit none
+character(200):: dummy
+integer::        n,ios,hash,lun
+
+nlines = 0    !Number of lines in file
+
+call getlun(lun)
+open(lun, file=trim(x_injType))
+do
+  read (lun,*,iostat=ios) dummy
+  if (ios .lt. 0) exit    !ios=0 if read is success; -1 if eor is reached
+  hash = index(dummy,"#") !Possibly extend: index(d,"#") + index(d,"!") + ...
+  if (hash .eq. 0) then   !If "#" is not in line, add 1
+    nlines = nlines + 1
+  endif
+enddo
+
+allocate(lam_user(nlines))
+allocate(nu_user(nlines))
+allocate(flux_user(nlines))
+
+rewind(lun)
+n = 1
+do
+  read (lun,*,iostat=ios) dummy                       !First check
+  hash = index(dummy,"#")                             !  if line is commented
+  if (hash .eq. 0) then                               !If it's not, then
+      backspace(lun)                                  !  go back 1 record,
+      read (lun,*,iostat=ios) lam_user(n),flux_user(n)!  read into arrays,
+      if (n .eq. nlines) exit                         !  until and incl. you reach final line
+      n = n + 1
+  endif
+enddo
+
+lam_user  = lam_user / 1e8
+allocate(dlam_down(nlines))
+allocate(dlam_up(nlines))
+dlam_down(1)        = 0
+dlam_down(2:nlines) = lam_user(2:nlines) - lam_user(1:nlines-1)
+dlam_up(nlines)     = 0
+dlam_up(1:nlines-1) = lam_user(2:nlines) - lam_user(1:nlines-1)
+dlam_user           = (dlam_down + dlam_up) / 2
+nu_user             = c / lam_user
+deallocate(dlam_down)
+deallocate(dlam_up)
+
+! do n = 1,nlines
+!   print*, n,lam_user(n)*1e8,dlam_user(n)*1e8
+! enddo
+! stop
+
+close(lun)
+
+end subroutine read_spec
+
+!------------------------------------------------------------------------------
 
 subroutine RecoverCoreHistory(absorb)
 
@@ -5251,8 +5484,6 @@ k_HI = n_HI * sigma_x                           !H scattering coefficient
 k_d  = n_d  * sigma_d                           !Dust interaction coefficient
 P_H  = k_HI / (k_HI + k_d)                      !Probability of being scattered
                                                 !by a hydrogen atom
-!write(1,*) x, 1d0/(1d0-P_H)
-
 call MonteCarlo(R)
 
 if (R .le. P_H) then
@@ -5400,6 +5631,7 @@ implicit none
 type(Cell), target:: CurrentCell
 real(dp)::           X(3),d,nhat(3),v(3),u(3),norm,XwrtC(3),Outflow,gradfac
 integer::            ii,jj,kk,p,clnum
+logical:: inside1,inside2
 
 # ifdef AMR
 # ifdef multi
@@ -5413,15 +5645,15 @@ if (CurrentCell%Refined) then
   enddo
 else
   p = CurrentCell%phase
-  if (p .eq. 1) then                            !Cloud
-    clnum = CurrentCell%clnum
-    X     = Clouds(clnum,1:3)
-    XwrtC = X - R_box
-    d     = norm(XwrtC)
-    nhat  = XwrtC / d
-    v     = Outflow(d) * nhat
-    v     = v + CloudVelDisp(clnum,:)
-  else                                          !ICM
+  if (p .eq. 1) then           !Cloud: Give all cells in cloud the same velocity,
+    clnum = CurrentCell%clnum  !       i.e. no gradients inside clouds
+    X     = Clouds(clnum,1:3)  !Cloud center [0,D]
+    XwrtC = X - R_box          !Cloud center [-R,R]
+    d     = norm(XwrtC)        !Dist from box center to cloud center
+    nhat  = XwrtC / d          !Unit vector from center to cloud
+    v     = Outflow(d) * nhat  !Velocity of whole cloud
+    v     = v + CloudVelDisp(clnum,:) !Add dispersion
+  else                         !ICM: Just give velocity according to position
     X     = CurrentCell%C_pos
     XwrtC = X - R_box
     d     = norm(XwrtC)
@@ -5429,13 +5661,39 @@ else
     v     = Outflow(d) * nhat
   endif
   u = v2u(v,Dnu_DString(p))
+! write(1,*) d/kpc, dot_product(v,nhat) !write all cell velocities
 
-  gradfac = exp(-(d/H1)**exp1)
-
+  if ((d.ge.r_inner) .and. (d.le.r_outer)) then
+    gradfac = exp(-((d-r_inner)/H1)**exp1) ! WALLAH
+  else
+    gradfac = 0
+  endif
   CurrentCell%n_HI   = n_HIString(p) * gradfac
   CurrentCell%Dnu_D  = Dnu_DString(p)
   CurrentCell%U_bulk = u
   CurrentCell%n_d    = n_dString(p)  * gradfac
+! if (p.eq.0) print*, p, CurrentCell%C_pos / kpc ! write(10,*) CurrentCell%C_pos / kpc
+! if (p.eq.1) print*, p, CurrentCell%C_pos / kpc ! write(11,*) CurrentCell%C_pos / kpc
+! if (p.eq.2) print*, p, CurrentCell%C_pos / kpc ! write(12,*) CurrentCell%C_pos / kpc
+
+  ! ---------------  Outside jets, i.e. "galaxy"  ----------------------!
+  inside1 = .false.                                                     !
+  inside2 = .false.                                                     !
+  call insideCappedCone(XwrtC, n_jet,OA,r_gal,(/0d0,0d0,0d0/),inside1)  !
+  call insideCappedCone(XwrtC,-n_jet,OA,r_gal,(/0d0,0d0,0d0/),inside2)  !
+  if ((.not.inside1) .and. (.not.inside2) .and. (d.le.r_gal)) then      !
+    gradfac            = exp(-(d/H2)**exp1)                             !
+    CurrentCell%n_HI   = n_HIString(1) * gradfac                        !
+    CurrentCell%Dnu_D  = Dnu_DString(1)                                 !
+    CurrentCell%U_bulk = u                                              !
+    CurrentCell%n_d    = n_dString(1)  * gradfac                        !
+  endif                                                                 !
+  ! --------------------------------------------------------------------!
+
+! if (XwrtC(3) .lt. 0) then
+!   CurrentCell%n_HI   = 0.
+!   CurrentCell%n_d    = 0.
+! endif
 endif
 # endif
 # endif
@@ -5446,82 +5704,82 @@ end subroutine AssignParameters
 
 recursive subroutine BuildFlorent(CurrentCell,CurrentLevel)
 
-use kinds
-use PhysicalConstants
-use CellStructure
-use GlobalData
-use DataArrays
-use iv2u
-use iMonteCarlo
-use igasdev
-
-implicit none
-type(Cell), target::     CurrentCell
-integer, intent(in)::    CurrentLevel
-integer::                ii,jj,kk,cl,p
-!real(sp)::                 Dnu_D,n_HI,n_d
-real(dp)::                 zz,X(3),norm,nhat(3),d,R,v(3),u(3),XwrtC(3),R3(3)
-
-X     = CurrentCell%C_pos
-XwrtC = X - R_box
-d     = norm(XwrtC)
-if (d.ge.r_inner .and. d.le.r_outer) then
-  call MonteCarlo(R)
-  p = merge(1,2,R.lt.FF)                        !1 if cell is in shell and
-else                                            !  contains a cloud; 2 otherwise
-  p = 0                                         !0 if outside shell (void)
-endif
-
-nhat = (X-R_box) / d                            !Unit vector from box center to cell center
-v    = V_out * nhat                             !Cell velocity; km/s
-if (trim(Vprof) .eq. 'linear') v = v * d/R_box
-call gasdev(R3)
-v = v + R3*sigV_cl
-u = v2u(v,Dnu_DString(p))                       !Cell velocity; v_th
-
-# ifdef AMR
-  if (LevelString(i_cell) .eq. CurrentLevel) then
-    CurrentCell%Level  = LevelString(p)
-    CurrentCell%n_HI   = n_HIString(p)
-    CurrentCell%Dnu_D  = Dnu_DString(p)
-    CurrentCell%U_bulk = real(u)
-#   ifdef dust
-    CurrentCell%n_d    = n_dString(p)
-#   endif
-#   ifdef multi
-    CurrentCell%phase  = p
-#   endif
-  elseif (LevelString(i_cell) .gt. CurrentLevel) then
-    CurrentCell%Refined = .true.
-    CurrentCell%Level   = CurrentLevel
-    allocate(CurrentCell%Child(2,2,2))
-
-    i_cell = i_cell - 1
-    do ii = 1,2
-      do jj = 1,2
-        do kk = 1,2
-          CurrentCell%Child(ii,jj,kk)%Refined = .false.
-          nullify(CurrentCell%Child(ii,jj,kk)%Child)
-          call BuildFlorent(CurrentCell%Child(ii,jj,kk), CurrentLevel+1)
-        enddo
-      enddo
-    enddo
-  else
-    write(*,*) 'Aaargh! Error in levels', i_cell, LevelString(i_cell), CurrentLevel
-    stop
-  endif
-# else
-  ! if (p.eq.1) write(32,*) CurrentCell%C_pos/kpc
-    CurrentCell%n_HI   = n_HIString(p)
-    CurrentCell%Dnu_D  = Dnu_DString(p)
-    CurrentCell%U_bulk = real(u)
-#   ifdef dust
-    CurrentCell%n_d    = n_dString(p)
-#   endif
-#   ifdef multi
-    CurrentCell%phase  = p
-#   endif
-# endif
+! use kinds
+! use PhysicalConstants
+! use CellStructure
+! use GlobalData
+! use DataArrays
+! use iv2u
+! use iMonteCarlo
+! use igasdev
+! 
+! implicit none
+! type(Cell), target::     CurrentCell
+! integer, intent(in)::    CurrentLevel
+! integer::                ii,jj,kk,cl,p
+! !real(sp)::                 Dnu_D,n_HI,n_d
+! real(dp)::                 zz,X(3),norm,nhat(3),d,R,v(3),u(3),XwrtC(3),R3(3)
+! 
+! X     = CurrentCell%C_pos
+! XwrtC = X - R_box
+! d     = norm(XwrtC)
+! if (d.ge.r_inner .and. d.le.r_outer) then
+!   call MonteCarlo(R)
+!   p = merge(1,2,R.lt.FF)                        !1 if cell is in shell and
+! else                                            !  contains a cloud; 2 otherwise
+!   p = 0                                         !0 if outside shell (void)
+! endif
+! 
+! nhat = (X-R_box) / d                            !Unit vector from box center to cell center
+! v    = V_out * nhat                             !Cell velocity; km/s
+! if (trim(Vprof) .eq. 'linear') v = v * d/R_box
+! call gasdev(R3)
+! v = v + R3*sigV_cl
+! u = v2u(v,Dnu_DString(p))                       !Cell velocity; v_th
+! 
+! # ifdef AMR
+!   if (LevelString(i_cell) .eq. CurrentLevel) then
+!     CurrentCell%Level  = LevelString(p)
+!     CurrentCell%n_HI   = n_HIString(p)
+!     CurrentCell%Dnu_D  = Dnu_DString(p)
+!     CurrentCell%U_bulk = real(u)
+! #   ifdef dust
+!     CurrentCell%n_d    = n_dString(p)
+! #   endif
+! #   ifdef multi
+!     CurrentCell%phase  = p
+! #   endif
+!   elseif (LevelString(i_cell) .gt. CurrentLevel) then
+!     CurrentCell%Refined = .true.
+!     CurrentCell%Level   = CurrentLevel
+!     allocate(CurrentCell%Child(2,2,2))
+! 
+!     i_cell = i_cell - 1
+!     do ii = 1,2
+!       do jj = 1,2
+!         do kk = 1,2
+!           CurrentCell%Child(ii,jj,kk)%Refined = .false.
+!           nullify(CurrentCell%Child(ii,jj,kk)%Child)
+!           call BuildFlorent(CurrentCell%Child(ii,jj,kk), CurrentLevel+1)
+!         enddo
+!       enddo
+!     enddo
+!   else
+!     write(*,*) 'Aaargh! Error in levels', i_cell, LevelString(i_cell), CurrentLevel
+!     stop
+!   endif
+! # else
+!   ! if (p.eq.1) write(32,*) CurrentCell%C_pos/kpc
+!     CurrentCell%n_HI   = n_HIString(p)
+!     CurrentCell%Dnu_D  = Dnu_DString(p)
+!     CurrentCell%U_bulk = real(u)
+! #   ifdef dust
+!     CurrentCell%n_d    = n_dString(p)
+! #   endif
+! #   ifdef multi
+!     CurrentCell%phase  = p
+! #   endif
+! # endif
 
 end subroutine BuildFlorent
 
@@ -5579,122 +5837,122 @@ end subroutine BuildMultiphase
 
 recursive subroutine BuildSemireal(CurrentCell,CurrentLevel)
 
-use kinds
-use PhysicalConstants
-use CellStructure
-use GlobalData
-use DataArrays
-use iv2u
-use igasdev
-
-implicit none
-type(Cell), target::     CurrentCell
-integer, intent(in)::    CurrentLevel
-integer::                ii,jj,kk,cl,p,ijk_c(3),ijk_cl(3)
-!real(sp)::                 Dnu_D,n_HI,n_d
-real(dp)::               zz,norm,d_cl,d,gradfac
-real(dp),dimension(3)::  R3,X,X_cl,nhat,v,dv,u,XwrtC(3)
-real(dp)::               left,right
-logical::                GoodEnough
-
-X     = CurrentCell%C_pos
-XwrtC = X - R_box
-d     = norm(XwrtC)
-p     = merge(2,0,d.le.r_gal)                   !Default phase: "ICM" if inside galaxy, "void" if outside
-dv    = 0.
-
-if (p.eq.2) then
-  do cl = 1,N_cl
-    X_cl = Clouds(cl,:)                         !Position of cloud cl's center
-    d_cl = sqrt(sum((X-X_cl)**2))               !Distance of cell to cloud center
-    !--------------------------------------------------------------------------
-    !  Make sure cell is a cloud if hosting a cloud center, even if d_cl<r_cl.!
-    !                 !!!! THIS ONLY WORKS FOR NON-AMR !!!!!                  !
-                           ijk_c      = ceiling(X/dx0)                        !
-                           ijk_cl     = ceiling(X_cl/dx0)                     !
-                           GoodEnough = all(ijk_c .eq. ijk_cl)                !
-      ! For AMR, use instead loop over Clouds-array with LocateHostCell.        !
-    !--------------------------------------------------------------------------
-    if (d_cl.le.r_cl .or. GoodEnough) then      !If inside cloud
-      p  = 1                                    !Cloud phase
-      dv = CloudVelDisp(cl,:)
-      if (len_trim(Cloudfile) .gt. 0) write(cloudlun,*) X/kpc
-      exit
-    endif
-  enddo
-endif
-
-if (d.ge.r_inner .and. d.le.r_outer) then
-  left  = cosOAb2sq * dot_product((X-R_box)/kpc,(X-R_box)/kpc)
-  right = dot_product((X-R_box)/kpc,n_jet)**2
-  if (left .le. right) then
-    p = 3                  !Set shell phase if inside cone
-    if (len_trim(Windfile) .gt. 0) write(windlun,*) X/kpc
-  endif
-endif
-! zz = 3*D_box/8 + X(2)/4 !Uncomment to cut upper half of shell, inclined 14 deg.
-! if (X(3) .gt. zz) p = 0 !
-
-nhat = XwrtC / norm(XwrtC)                      !Unit vector from box center to cell center
-if (p .eq. 3) then
-  v = V_out*nhat                                !
-  if (trim(Vprof) .eq. 'linear') v = v * d/R_box
-! if (.not.uniV) v = v * (d-r_inner)/(R_box-r_inner)
-else                                            !Cell velocity; km/s
-  v = V_in * nhat                               !
-  if (trim(Vprof) .eq. 'linear') v = v * d/R_box
-  v = v + dv
-endif
-u = v2u(v,Dnu_DString(p))                       !Cell velocity; v_th
-
-if (p .eq. 2) then
-  gradfac = exp(-(d/H1)**exp1)
-else
-  gradfac = 1d0
-endif
-
-# ifdef AMR
-  if (LevelString(i_cell) .eq. CurrentLevel) then
-    CurrentCell%Level  = LevelString(p)
-    CurrentCell%n_HI   = n_HIString(p) * gradfac
-    CurrentCell%Dnu_D  = Dnu_DString(p)
-    CurrentCell%U_bulk = real(u)
-#   ifdef dust
-    CurrentCell%n_d    = n_dString(p) * gradfac
-#   endif
-#   ifdef multi
-    CurrentCell%phase  = p
-#   endif
-  elseif (LevelString(i_cell) .gt. CurrentLevel) then
-    CurrentCell%Refined = .true.
-    CurrentCell%Level   = CurrentLevel
-    allocate(CurrentCell%Child(2,2,2))
-
-    i_cell = i_cell - 1
-    do ii = 1,2
-      do jj = 1,2
-        do kk = 1,2
-          CurrentCell%Child(ii,jj,kk)%Refined = .false.
-          nullify(CurrentCell%Child(ii,jj,kk)%Child)
-          call BuildSemireal(CurrentCell%Child(ii,jj,kk), CurrentLevel+1)
-        enddo
-      enddo
-    enddo
-  else
-    write(*,*) 'Aaargh! Error in levels', i_cell, LevelString(i_cell), CurrentLevel
-    stop
-  endif
-# else
-    CurrentCell%n_HI   = n_HIString(p) * gradfac
-    CurrentCell%Dnu_D  = Dnu_DString(p)
-    CurrentCell%U_bulk = real(u)
-#   ifdef dust
-    CurrentCell%n_d    = n_dString(p) * gradfac
-#   endif
-#   ifdef multi
-    CurrentCell%phase  = p
-#   endif
-# endif
+! use kinds
+! use PhysicalConstants
+! use CellStructure
+! use GlobalData
+! use DataArrays
+! use iv2u
+! use igasdev
+! 
+! implicit none
+! type(Cell), target::     CurrentCell
+! integer, intent(in)::    CurrentLevel
+! integer::                ii,jj,kk,cl,p,ijk_c(3),ijk_cl(3)
+! !real(sp)::                 Dnu_D,n_HI,n_d
+! real(dp)::               zz,norm,d_cl,d,gradfac
+! real(dp),dimension(3)::  R3,X,X_cl,nhat,v,dv,u,XwrtC(3)
+! real(dp)::               left,right
+! logical::                GoodEnough
+! 
+! X     = CurrentCell%C_pos
+! XwrtC = X - R_box
+! d     = norm(XwrtC)
+! p     = merge(2,0,d.le.r_gal)                   !Default phase: "ICM" if inside galaxy, "void" if outside
+! dv    = 0.
+! 
+! if (p.eq.2) then
+!   do cl = 1,N_cl
+!     X_cl = Clouds(cl,:)                         !Position of cloud cl's center
+!     d_cl = sqrt(sum((X-X_cl)**2))               !Distance of cell to cloud center
+!     !--------------------------------------------------------------------------
+!     !  Make sure cell is a cloud if hosting a cloud center, even if d_cl<r_cl.!
+!     !                 !!!! THIS ONLY WORKS FOR NON-AMR !!!!!                  !
+!                            ijk_c      = ceiling(X/dx0)                        !
+!                            ijk_cl     = ceiling(X_cl/dx0)                     !
+!                            GoodEnough = all(ijk_c .eq. ijk_cl)                !
+!     ! For AMR, use instead loop over Clouds-array with LocateHostCell.        !
+!     !--------------------------------------------------------------------------
+!     if (d_cl.le.r_cl .or. GoodEnough) then      !If inside cloud
+!       p  = 1                                    !Cloud phase
+!       dv = CloudVelDisp(cl,:)
+!       if (len_trim(Cloudfile) .gt. 0) write(cloudlun,*) X/kpc
+!       exit
+!     endif
+!   enddo
+! endif
+! 
+! if (d.ge.r_inner .and. d.le.r_outer) then
+!   left  = cosOAb2sq * dot_product((X-R_box)/kpc,(X-R_box)/kpc)
+!   right = dot_product((X-R_box)/kpc,n_jet)**2
+!   if (left .le. right) then
+!     p = 3                  !Set shell phase if inside cone
+!     if (len_trim(Windfile) .gt. 0) write(windlun,*) X/kpc
+!   endif
+! endif
+! ! zz = 3*D_box/8 + X(2)/4 !Uncomment to cut upper half of shell, inclined 14 deg.
+! ! if (X(3) .gt. zz) p = 0 !
+! 
+! nhat = XwrtC / norm(XwrtC)                      !Unit vector from box center to cell center
+! if (p .eq. 3) then
+!   v = V_out*nhat                                !
+!   if (trim(Vprof) .eq. 'linear') v = v * d/R_box
+! ! if (.not.uniV) v = v * (d-r_inner)/(R_box-r_inner)
+! else                                            !Cell velocity; km/s
+!   v = V_in * nhat                               !
+!   if (trim(Vprof) .eq. 'linear') v = v * d/R_box
+!   v = v + dv
+! endif
+! u = v2u(v,Dnu_DString(p))                       !Cell velocity; v_th
+! 
+! if (p .eq. 2) then
+!   gradfac = exp(-(d/H1)**exp1)
+! else
+!   gradfac = 1d0
+! endif
+! 
+! # ifdef AMR
+!   if (LevelString(i_cell) .eq. CurrentLevel) then
+!     CurrentCell%Level  = LevelString(p)
+!     CurrentCell%n_HI   = n_HIString(p) * gradfac
+!     CurrentCell%Dnu_D  = Dnu_DString(p)
+!     CurrentCell%U_bulk = real(u)
+! #   ifdef dust
+!     CurrentCell%n_d    = n_dString(p) * gradfac
+! #   endif
+! #   ifdef multi
+!     CurrentCell%phase  = p
+! #   endif
+!   elseif (LevelString(i_cell) .gt. CurrentLevel) then
+!     CurrentCell%Refined = .true.
+!     CurrentCell%Level   = CurrentLevel
+!     allocate(CurrentCell%Child(2,2,2))
+! 
+!     i_cell = i_cell - 1
+!     do ii = 1,2
+!       do jj = 1,2
+!         do kk = 1,2
+!           CurrentCell%Child(ii,jj,kk)%Refined = .false.
+!           nullify(CurrentCell%Child(ii,jj,kk)%Child)
+!           call BuildSemireal(CurrentCell%Child(ii,jj,kk), CurrentLevel+1)
+!         enddo
+!       enddo
+!     enddo
+!   else
+!     write(*,*) 'Aaargh! Error in levels', i_cell, LevelString(i_cell), CurrentLevel
+!     stop
+!   endif
+! # else
+!     CurrentCell%n_HI   = n_HIString(p) * gradfac
+!     CurrentCell%Dnu_D  = Dnu_DString(p)
+!     CurrentCell%U_bulk = real(u)
+! #   ifdef dust
+!     CurrentCell%n_d    = n_dString(p) * gradfac
+! #   endif
+! #   ifdef multi
+!     CurrentCell%phase  = p
+! #   endif
+! # endif
 
 end subroutine BuildSemireal
 
@@ -5760,73 +6018,73 @@ end subroutine BuildNestedUniverse
 
 recursive subroutine BuildShell(CurrentCell,CurrentLevel)
 
-use kinds
-use PhysicalConstants
-use CellStructure
-use GlobalData
-use DataArrays
-use iv2u
-
-implicit none
-type(Cell), target::     CurrentCell
-integer, intent(in)::    CurrentLevel
-integer::                ii,jj,kk,cl,p
-!real(sp)::                 Dnu_D,n_HI,n_d
-real(dp)::                 zz,X(3),norm,nhat(3),d,v(3),u(3),XwrtC(3)
-
-X = CurrentCell%C_pos
-XwrtC = X - R_box
-d = norm(XwrtC)
-p = merge(1,0,d.ge.r_inner .and. d.le.r_outer)!1 if in shell, 0 if outside
-
-nhat = (X-R_box) / d                            !Unit vector from box center to cell center
-v    = V_out * nhat                             !Cell velocity; km/s
-if (trim(Vprof) .eq. 'linear') v = v * d/R_box
-u = v2u(v,Dnu_DString(p))                     !Cell velocity; v_th
-
-# ifdef AMR
-  if (LevelString(i_cell) .eq. CurrentLevel) then
-    CurrentCell%Level  = LevelString(p)
-    CurrentCell%n_HI   = n_HIString(p)
-    CurrentCell%Dnu_D  = Dnu_DString(p)
-    CurrentCell%U_bulk = real(u)
-#   ifdef dust
-    CurrentCell%n_d    = n_dString(p)
-#   endif
-#   ifdef multi
-    CurrentCell%phase  = p
-#   endif
-  elseif (LevelString(i_cell) .gt. CurrentLevel) then
-    CurrentCell%Refined = .true.
-    CurrentCell%Level   = CurrentLevel
-    allocate(CurrentCell%Child(2,2,2))
-
-    i_cell = i_cell - 1
-    do ii = 1,2
-      do jj = 1,2
-        do kk = 1,2
-          CurrentCell%Child(ii,jj,kk)%Refined = .false.
-          nullify(CurrentCell%Child(ii,jj,kk)%Child)
-          call BuildShell(CurrentCell%Child(ii,jj,kk), CurrentLevel+1)
-        enddo
-      enddo
-    enddo
-  else
-    write(*,*) 'Aaargh! Error in levels', i_cell, LevelString(i_cell), CurrentLevel
-    stop
-  endif
-# else
-!   if (p.eq.1 .and.CurrentCell%C_pos(1).gt.R_box) write(32,*) d/kpc,CurrentCell%C_pos/kpc
-    CurrentCell%n_HI   = n_HIString(p)
-    CurrentCell%Dnu_D  = Dnu_DString(p)
-    CurrentCell%U_bulk = real(u)
-#   ifdef dust
-    CurrentCell%n_d    = n_dString(p)
-#   endif
-#   ifdef multi
-    CurrentCell%phase  = p
-#   endif
-# endif
+! use kinds
+! use PhysicalConstants
+! use CellStructure
+! use GlobalData
+! use DataArrays
+! use iv2u
+! 
+! implicit none
+! type(Cell), target::     CurrentCell
+! integer, intent(in)::    CurrentLevel
+! integer::                ii,jj,kk,cl,p
+! !real(sp)::                 Dnu_D,n_HI,n_d
+! real(dp)::                 zz,X(3),norm,nhat(3),d,v(3),u(3),XwrtC(3)
+! 
+! X = CurrentCell%C_pos
+! XwrtC = X - R_box
+! d = norm(XwrtC)
+! p = merge(1,0,d.ge.r_inner .and. d.le.r_outer)!1 if in shell, 0 if outside
+! 
+! nhat = (X-R_box) / d                            !Unit vector from box center to cell center
+! v    = V_out * nhat                             !Cell velocity; km/s
+! if (trim(Vprof) .eq. 'linear') v = v * d/R_box
+! u = v2u(v,Dnu_DString(p))                     !Cell velocity; v_th
+! 
+! # ifdef AMR
+!   if (LevelString(i_cell) .eq. CurrentLevel) then
+!     CurrentCell%Level  = LevelString(p)
+!     CurrentCell%n_HI   = n_HIString(p)
+!     CurrentCell%Dnu_D  = Dnu_DString(p)
+!     CurrentCell%U_bulk = real(u)
+! #   ifdef dust
+!     CurrentCell%n_d    = n_dString(p)
+! #   endif
+! #   ifdef multi
+!     CurrentCell%phase  = p
+! #   endif
+!   elseif (LevelString(i_cell) .gt. CurrentLevel) then
+!     CurrentCell%Refined = .true.
+!     CurrentCell%Level   = CurrentLevel
+!     allocate(CurrentCell%Child(2,2,2))
+! 
+!     i_cell = i_cell - 1
+!     do ii = 1,2
+!       do jj = 1,2
+!         do kk = 1,2
+!           CurrentCell%Child(ii,jj,kk)%Refined = .false.
+!           nullify(CurrentCell%Child(ii,jj,kk)%Child)
+!           call BuildShell(CurrentCell%Child(ii,jj,kk), CurrentLevel+1)
+!         enddo
+!       enddo
+!     enddo
+!   else
+!     write(*,*) 'Aaargh! Error in levels', i_cell, LevelString(i_cell), CurrentLevel
+!     stop
+!   endif
+! # else
+! !   if (p.eq.1 .and.CurrentCell%C_pos(1).gt.R_box) write(32,*) d/kpc,CurrentCell%C_pos/kpc
+!     CurrentCell%n_HI   = n_HIString(p)
+!     CurrentCell%Dnu_D  = Dnu_DString(p)
+!     CurrentCell%U_bulk = real(u)
+! #   ifdef dust
+!     CurrentCell%n_d    = n_dString(p)
+! #   endif
+! #   ifdef multi
+!     CurrentCell%phase  = p
+! #   endif
+! # endif
 
 end subroutine BuildShell
 
@@ -5925,7 +6183,6 @@ integer:: ii,jj,kk,p,L
         p = CurrentCell%phase
         L = CurrentCell%Level
         FFcounter(p) = FFcounter(p) + (1d0/2d0**(3d0*L))
-      ! if (p .eq. 1) write(1,*) (CurrentCell%C_pos-R_box) / kpc
       endif
 #   else
       p = CurrentCell%phase
@@ -6242,35 +6499,66 @@ use GlobalData
 use PhysicalConstants
 
 implicit none
-real(dp):: Outflow,r,r_breakout,alpha,oma,A,term1,term2
+real(dp):: Outflow,r,r_breakout,alpha,oma,A,term1,term2,rr,up,down,r_Vout,rrr,V_end
 
-!r_breakout and alpha should be given in in-file, and the rest of this block
-!should be calc'd in ReadInput.
-r_breakout = r_gal/10.!1d0 * kpc                          !Distance from center where wind starts
-r_breakout = max(r_breakout,dxWeeny)            !Avoid infinities
-alpha      = 1.5                                ![1,15,1.95] (Steidel, 2010, ApJ, 717, 289)
-if (alpha .le. 1d0) stop 'Not ready for alpha =< 1.'
-oma   = 1 - alpha
-V_inf = V_out / sqrt(1-(r_gal/r_breakout)**oma) !V_out is at r_gal; V_inf is at infty
-A     = -oma*V_inf**2 / (2*r_breakout**oma)     !"A constant that sets V_inf"
-term1 = -2 * A / oma
-
-if (r .ge. r_breakout) then
-  select case (trim(Vprof))
-    case ('momentum')
+select case (trim(Vprof(:4)))
+  case ('mome')
+    ! HACKETY-HACK WARNING:
+    !  r_breakout and alpha should be given in in-file, and the rest of this block
+    !  should be calc'd in ReadInput.
+    r_breakout = r_gal/10.!1d0 * kpc                          !Distance from center where wind starts
+    r_breakout = max(r_breakout,dxWeeny)            !Avoid infinities
+    if (r .ge. r_breakout) then
+      alpha      = 1.5                                ![1,15,1.95] (Steidel, 2010, ApJ, 717, 289)
+      if (alpha .le. 1d0) stop 'Not ready for alpha =< 1.'
+      oma   = 1 - alpha
+      V_inf = V_out / sqrt(1-(r_gal/r_breakout)**oma) !V_out is at r_gal; V_inf is at infty
+      A     = -oma*V_inf**2 / (2*r_breakout**oma)     !"A constant that sets V_inf"
+      term1 = -2 * A / oma
       term2   = r_breakout**oma - r**oma
       Outflow = sign(sqrt(term1*term2),V_inf)
-    case ('linear') !Linearly from 0 to V_out as r goes from r_breakout to r_gal
-      Outflow = V_out * (r-r_breakout) / (r_gal-r_breakout)
-    case ('constant')
-      Outflow = V_out
-    case default
-      write(*,*) "Unknown wind profile '"//trim(Vprof)//"'."
-      stop
-  end select
-else
-  Outflow = 0
-endif
+    else
+      Outflow = 0
+    endif
+
+! case ('line') !Linearly from 0 to V_out as r goes from r_breakout to r_gal
+!   r_breakout = r_gal/10.!1d0 * kpc                          !Distance from center where wind starts
+!   r_breakout = max(r_breakout,dxWeeny)            !Avoid infinities
+!   if (r .ge. r_breakout) then
+!   Outflow = V_out * (r-r_breakout) / (r_gal-r_breakout)
+!   else
+!     Outflow = 0
+!   endif
+
+  case ('Vend') !Linearly from V_out to V_end as r goes from r_inner to r_outer
+    read(Vprof(5:),*) V_end                  !What comes after 'Vend' is read into the variable r_Vout
+    r_inner = max(r_inner,dxWeeny)            !Avoid infinities
+    if ((r.ge.r_inner) .and. (r.le.r_outer)) then
+      Outflow = V_out + (V_end-V_out)/(r_outer-r_inner) * (r-r_inner)
+    else
+      Outflow = 0
+    endif
+
+  case ('cons')
+    Outflow = V_out
+
+  case ('rmax')
+    read(Vprof(5:),*) r_Vout                  !What comes after 'rmax' is read into the variable r_Vout
+    rr      = (r/kpc) / (r_Vout/ee)
+    up      = rr**sqrte
+    down    = exp(-rr / sqrte)
+    Outflow = V_out * up * down
+
+  case ('goto')  !In- or decrease linearly from V_out at r=0 to V_end at r=r_gal
+    read(Vprof(5:),*) V_end   ! example: 'goto0' makes V go to 0 at r_gal.
+    Outflow = max(0d0, (V_end-V_out) * r/r_gal + V_out)
+
+  case default
+    write(*,*) "Unknown wind profile '"//trim(Vprof)//"'."
+    stop
+end select
+
+! write(1,*) r/kpc, Outflow
 
 end function
 !------------------------------------------------------------------------------

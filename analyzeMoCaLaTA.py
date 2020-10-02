@@ -9,6 +9,7 @@ from astropy.units.function import LogQuantity as ulog10
 from astropy.cosmology import FlatLambdaCDM
 from astropy.cosmology import Planck15
 from astropy.convolution import convolve, Gaussian1DKernel, Gaussian2DKernel, Box1DKernel
+import astropy.constants as cc
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.integrate import simps
 
@@ -772,4 +773,222 @@ def flux_ratio(galdir1, view1, ap1, ap2,
     Ftot2 = showobs(galdir2,view2,seeing=seeing2,spatial_aperture=ap2,get_value='Ftot',showit=False)
 
     return Ftot1 / Ftot2
+#------------------------------------------------------------------------------
+
+def test_dijkstra(galdir, view, N, T,
+    spatial_aperture    = None,
+    spec_ap             = None,
+    mother              = './',
+    cosmo               = Planck15,
+    vmin                = None,
+    vmax                = None,
+    endianness          = 'big',
+    seeing              = 0,
+    get_value           = None,
+    showit              = True,
+    comp_spec           = 'spectrum.dat',
+    obs2rest            = True,
+    fix_amplitude       = 1,
+    smoothspec          = 1*u.AA,#0,
+    ymax_spec           = 1e-16,#None,
+    saveit              = None,     #file extension for saved figure, e.g. 'png'
+    window_position     = '+580+580' # x-y position of plot's upper left corner; set to None to let matplotlib decide
+    ):
+    """
+    Show spectrum and SB map in a given direction of MoCaLaTA output.
+
+    Example
+    -------
+
+    >>> showobs('gal03/0068/','xm')
+    """
+
+    # Load binfile
+    binfile        = mother + '/' + galdir + '/' + view + '.bin'
+    par,spec1D,IFU = readMoCaLaTA(binfile,endianness=endianness,cosmo=cosmo)
+    Rvals,angvals  = par['Rvals'],par['angvals']
+
+    #Fix amplitude
+    spec1D = fix_amplitude * spec1D
+    IFU    = fix_amplitude * IFU
+
+    # Cut out desired wavelength range
+    wavelength = (1+par['z']) * np.linspace(par['BW'][0],par['BW'][1],par['SpecRes2D'])
+    if spec_ap is None:
+        spec_ap = [(1+par['z'])*par['BW'][0], (1+par['z'])*par['BW'][1]]
+    isp  = (spec_ap[0] <= wavelength) & (wavelength <= spec_ap[1])
+    IFU  = IFU[isp,:,:]
+    wavelength = wavelength[isp]
+
+    # Collapse along spectral direction
+    SBmap = np.sum(IFU, axis=0) * par['dlam2']
+    SBmap = SBmap.value
+
+    # Blur image by seeing
+    if seeing != 0:
+        assert seeing.unit != u.dimensionless_unscaled, "Seeing must have units of angle"
+        seeing_kpc = (seeing / par['as_kpc']).to(u.kpc)
+        seeing_pix = (seeing_kpc / par['dx']).value
+        stddev_pix = seeing_pix / 2.355
+        kernel     = Gaussian2DKernel(stddev_pix)
+        SBmap      = convolve(SBmap,kernel)
+
+    # Extract spectrum from aperture
+    if spatial_aperture is not None:
+        mask2d = np.array([[LA.norm([x-spatial_aperture[0],y-spatial_aperture[1]]) < spatial_aperture[2]
+            for x in Rvals.value] for y in Rvals.value])            #True if inside aperture
+        mask3d = np.broadcast_to(mask2d, IFU.shape)
+        spec1D = np.sum(IFU*mask3d,axis=(1,2)) * par['dOmega']#Coll. along spatial directions
+    else:
+        spec1D = np.sum(IFU,       axis=(1,2)) * par['dOmega']#Coll. along spatial directions
+
+    # Redshift-dilute spectral density
+    spec1D = spec1D / (1+par['z'])
+    # Smooth spectrum
+    if smoothspec != 0:
+        assert (u.Quantity(smoothspec)).unit.is_equivalent(u.m), '`smoothspec` must have dimensions of length.'
+        smoothres = (smoothspec / (par['dlam2'] * (1+par['z']))).decompose()
+      # print('par  =', par['dlam2'])
+      # print('len  =', len(spec1D))
+        kernel    = Gaussian1DKernel(smoothres)
+      # print('smoothres    =', smoothres)
+        spec1D    = convolve(spec1D.value,kernel) * spec1D.unit
+
+    SBmap[SBmap==0] = SBmap[np.nonzero(SBmap)].min() # adding the min ???
+    logSBmap   = log10(SBmap)
+
+    # Plot SB map, SB profile, and spectrum
+    if showit:
+        dx    = 1 / 13.
+        wtot  = 10.
+        htot  = 5 * dx * wtot
+        dy    = dx / htot * wtot
+        mleft = .8 * dx
+        wfig  = 3 * dx
+        hfig  = 3 * dy
+        mbot  = .8 * dy
+        mtop  = 1 * dy
+        pad   = .39
+        hbar  = .3 * dy
+
+        SBlo       = SBmap.min()
+        SBhi       = SBmap.max()
+        logSBlo    = log10(SBlo)
+        logSBhi    = log10(SBhi)
+        if vmin is None: vmin = logSBlo
+        if vmax is None: vmax = logSBhi
+      # print(logSBlo, logSBhi)
+
+        img  = logSBmap
+        cmap = 'hot'
+
+        plt.close('all')
+        fig = plt.figure(figsize=(wtot,htot))
+        ax1 = fig.add_axes([mleft,mbot,wfig,hfig+.13])
+      # alphamap = (logSBmap-logSBlo) / (logSBhi - logSBlo)
+        im = ax1.imshow(img, cmap=cmap, origin='lower',
+                vmin=vmin, vmax=vmax,
+              # alpha=alphamap,
+                extent=[par['Rlim'][0].value,
+                        par['Rlim'][1].value,
+                        par['Rlim'][0].value,
+                        par['Rlim'][1].value],
+                aspect='auto')
+
+        backend = mpl.get_backend() 
+        if backend == 'TkAgg':
+            wm = plt.get_current_fig_manager()
+            wm.window.wm_geometry(window_position)
+        else:
+            if window_position is not None:
+                print("WARNING: window positioning not possible with backend '"+backend+"'. Try 'TkAgg', or set 'window_position' to None.")
+        ax1.set_xlabel('x / kpc')
+        ax1.set_ylabel('y / arcsec')
+        Lbox = par['Lbox']
+        Rtix = u.Quantity([-Lbox/2, -Lbox/4, 0*u.kpc, Lbox/4, Lbox/2])
+        ax1.set_yticks(Rtix.value)
+        angtix = ('{:4.1f} '*len(Rtix)).format(*(Rtix*par['as_kpc']).value).split()
+        ax1.set_yticklabels(angtix)
+
+        # Color bar
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        divider = make_axes_locatable(ax1)
+        cax = divider.new_vertical(size="5%", pad=pad, pack_start=False)
+        fig.add_axes(cax)
+        cb = fig.colorbar(im, cax=cax, orientation="horizontal")
+        cb.ax.xaxis.set_ticks_position('bottom')
+        cb.ax.xaxis.set_label_position('top')
+        cb.ax.tick_params(labelsize=8)
+        cb.set_label(label='log(SB / $\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^{-2}\,\mathrm{arcsec}^{-1}$)',
+                size=8)
+
+        # SB profile
+        r,SBprof = SB_profile(SBmap,par,spatial_aperture)
+        if spatial_aperture is not None:
+            apCircle = plt.Circle((spatial_aperture[0],spatial_aperture[1]),spatial_aperture[2], color='lime', fill=False)
+            ax1.add_artist(apCircle)
+        ax2 = fig.add_axes([mleft+wfig+1.3*dx,mbot,wfig,hfig])
+        ax2.set_xlim([0,r.max()])
+        ax2.set_ylim([1e-4*SBprof.max(),2*SBprof.max()])
+        ax2.plot(r,SBprof)
+        ax2.set_yscale('log')
+        ax2.set_ylabel('log(SB / $\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^{-2}\,\mathrm{arcsec}^{-1}$)')
+
+        # Spectrum
+        import Lya
+        lam     = wavelength / (1+par['z'])
+        dijkstra = Lya.Dijkstra_lamNT(lam.to(u.AA).value,N,T,normalize=True)
+        spec1D  = spec1D / simps(spec1D,lam)
+
+
+        ax3 = fig.add_axes([mleft+2*(wfig+1.3*dx),mbot,wfig,hfig])
+        if ymax_spec is None: ymax_spec = 2*spec1D.value.max()
+        ax3.set_ylim([0,ymax_spec])
+        ax3.plot(lam,spec1D,'-b',lw=2)
+        ax3.plot(lam,dijkstra,'--g',lw=.5)
+      # ax3.plot(lam0*(1+par['z'])*np.array([1,1]), [0,spec1D.max().value],'k--',alpha=.25)
+        ax3.set_ylabel('J (normalized)')
+
+        comp_old = True
+        if comp_old:
+            x20,J20     = np.loadtxt('/Users/pela/GitHub/MoCaLaTA/outflow_dijkstra_N2e20_T1e4_V20.dat',   unpack = True)
+            x200,J200   = np.loadtxt('/Users/pela/GitHub/MoCaLaTA/outflow_dijkstra_N2e20_T1e4_V200.dat',  unpack = True)
+            x2000,J2000 = np.loadtxt('/Users/pela/GitHub/MoCaLaTA/outflow_dijkstra_N2e20_T1e4_V2000.dat', unpack = True)
+            DnuD        = Lya.doppler(1e4)
+            lam20       = Lya.c_AAs / (x20  *DnuD + Lya.nu0)
+            lam200      = Lya.c_AAs / (x200 *DnuD + Lya.nu0)
+            lam2000     = Lya.c_AAs / (x2000*DnuD + Lya.nu0)
+            J20         = J20   / simps(J20,  -lam20)
+            J200        = J200  / simps(J200, -lam200)
+            J2000       = J2000 / simps(J2000,-lam2000)
+            ax3.plot(lam20,  J20,  '-y',lw=.5)
+            ax3.plot(lam200, J200, '-',c='orange',lw=.5)
+            ax3.plot(lam2000,J2000,'-r',lw=.5)
+
+        if saveit is not None:
+            figname = mother + '/' + galdir + '/' + view + '.' + saveit
+            plt.savefig(figname,box_inches='tight',dpi=200)
+
+    # Output
+  # print(spec1D[100])
+  # print(wavelength[100])
+    Ftot   = simps(spec1D.to(u.erg/u.s/u.AA/u.cm**2), x=wavelength.to(u.AA))
+  # ftest1 = (spec1D*(1+par['z']) * par['dlam2']).sum().value
+  # ftest2 = (SBmap * par['dOmega']).sum().value
+    Ltot   = Ftot * 4*pi*(par['dL'].to(u.cm).value)**2
+  # SFR    = Ltot / 1.1012e42
+  # np.testing.assert_approx_equal(Ftot,ftest1,significant=2) #only if full aperture
+  # np.testing.assert_approx_equal(Ftot,ftest2,significant=2) #only if full aperture
+  # print('dlam2  =', par['dlam2'])
+  # print('dL     =', par['dL'])
+  # print('Ftot   =', Ftot)
+  # print('ftest1 =', ftest1)
+  # print('ftest2 =', ftest2)
+  # print('Ltot   =', Ltot)
+  # print('SFR    =', SFR)
+
+    if get_value == 'Ftot':
+        return Ftot
+    elif get_value == 'Ltot':
+        return Ltot
 #------------------------------------------------------------------------------
